@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>YAS Browser</title>
+    <meta name="description" content="A modern, high-performance dark-themed desktop browser foundation with an integrated media downloader for YouTube and Instagram." />
+    <meta property="og:title" content="YAS Browser" />
+    <meta property="og:description" content="A modern, high-performance dark-themed desktop browser foundation with an integrated media downloader for YouTube and Instagram." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <!-- Google Fonts & Styles -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="/styles/main.css">
+  </head>
+  <body>
+    <div id="app">
+      <!-- =========================================================
+           1. Frameless Custom Window Titlebar & Tab Strip
+           ========================================================= -->
+      <header class="titlebar" id="titlebar">
+        <div class="titlebar-left">
+          <div class="brand-badge" id="brandBadge" title="YAS Browser Core">
+            <div class="brand-logo-icon">Y</div>
+            <span class="brand-name">YAS Browser</span>
+          </div>
+        </div>
+
+        <!-- Tab Strip -->
+        <div class="tab-strip" id="tabStrip">
+          <!-- Dynamically populated tab items -->
+        </div>
+
+        <!-- New Tab Button -->
+        <button class="tab-new-btn" id="newTabBtn" title="Open New Tab (Ctrl+T)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+        </button>
+
+        <!-- Window Controls (Minimize, Maximize, Close) -->
+        <div class="window-controls" id="windowControls">
+          <button class="win-btn" id="winMinimize" title="Minimize">─</button>
+          <button class="win-btn" id="winMaximize" title="Maximize">🗖</button>
+          <button class="win-btn win-close" id="winClose" title="Close">✕</button>
+        </div>
+      </header>
+
+      <!-- =========================================================
+           2. Browser Navigation & Toolbar
+           ========================================================= -->
+      <nav class="browser-toolbar" id="browserToolbar">
+        <!-- Navigation Arrows -->
+        <div class="nav-actions">
+          <button class="icon-btn" id="btnBack" title="Click to go back (Alt+Left)" disabled>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="19" y1="12" x2="5" y2="12"></line>
+              <polyline points="12 19 5 12 12 5"></polyline>
+            </svg>
+          </button>
+          <button class="icon-btn" id="btnForward" title="Click to go forward (Alt+Right)" disabled>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+              <polyline points="12 5 19 12 12 19"></polyline>
+            </svg>
+          </button>
+          <button class="icon-btn" id="btnReload" title="Reload this page (Ctrl+R)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="23 4 23 10 17 10"></polyline>
+              <polyline points="1 20 1 14 7 14"></polyline>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+            </svg>
+          </button>
+          <button class="icon-btn" id="btnHome" title="Open Home Dashboard">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+              <polyline points="9 22 9 12 15 12 15 22"></polyline>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Omnibox (Address & Search Bar) -->
+        <div class="omnibox-wrapper" id="omniboxWrapper">
+          <div class="security-badge" id="securityBadge" title="Connection is secure">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+            </svg>
+          </div>
+          <input 
+            type="text" 
+            class="omnibox-input" 
+            id="omniboxInput" 
+            placeholder="Search with Google or enter URL..." 
+            autocomplete="off" 
+            spellcheck="false"
+          />
+          <button class="omnibox-clear-btn" id="omniboxClearBtn" title="Clear omnibox" style="display: none;">✕</button>
+          <div class="omnibox-tools">
+            <button class="tool-chip" id="bookmarkBtn" title="Bookmark this page (Ctrl+D)">★</button>
+          </div>
+        </div>
+
+        <!-- Privacy Shields (Brave Style Tracker Blocker) -->
+        <button class="shield-toggle-btn" id="shieldToggleBtn" title="YAS Brave-Grade Shields Active">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+          </svg>
+          <span id="shieldCounter">142</span>
+        </button>
+
+        <!-- =========================================================
+             PROMINENT MEDIA DOWNLOAD BUTTON (Highest Priority Feature)
+             ========================================================= -->
+        <button class="media-download-trigger" id="mediaDownloadTriggerBtn" title="Open YouTube & Instagram Media Downloader (Ctrl+M)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          <span>Media Download</span>
+          <span class="pulse-badge"></span>
+          <span class="download-counter" id="downloadCounter" style="display: none;">0</span>
+        </button>
+
+        <!-- Top Loading Progress Bar -->
+        <div class="page-loading-bar" id="pageLoadingBar"></div>
+      </nav>
+
+      <!-- =========================================================
+           3. Primary Browser Viewport Area
+           ========================================================= -->
+      <main class="browser-viewport" id="browserViewport">
+        <!-- Persistent Tab Views Container (Preserves states when switching tabs) -->
+        <div class="tab-views-container" id="tabViewsContainer"></div>
+
+        <!-- New Tab / Dashboard View (Arc & Brave Inspired) -->
+        <div class="newtab-dashboard" id="newTabDashboard">
+          <div class="newtab-hero">
+            <div class="hero-clock" id="dashboardClock">12:00</div>
+            <div class="hero-date" id="dashboardDate">Tuesday, September 15</div>
+          </div>
+
+          <!-- Hero Search Box -->
+          <div class="hero-search-box">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-tertiary);">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input 
+              type="text" 
+              class="hero-search-input" 
+              id="heroSearchInput" 
+              placeholder="Search the web or paste any video link..." 
+              autocomplete="off"
+            />
+          </div>
+
+          <!-- Quick Speed Dials -->
+          <div class="speed-dials-grid">
+            <div class="speed-dial-card youtube" data-url="https://youtube.com" data-title="YouTube">
+              <div class="speed-dial-icon">▶️</div>
+              <span class="speed-dial-label">YouTube</span>
+            </div>
+            <div class="speed-dial-card instagram" data-url="https://instagram.com" data-title="Instagram">
+              <div class="speed-dial-icon">📸</div>
+              <span class="speed-dial-label">Instagram</span>
+            </div>
+            <div class="speed-dial-card github" data-url="https://github.com" data-title="GitHub">
+              <div class="speed-dial-icon">💻</div>
+              <span class="speed-dial-label">GitHub</span>
+            </div>
+            <div class="speed-dial-card reddit" data-url="https://reddit.com" data-title="Reddit">
+              <div class="speed-dial-icon">🔥</div>
+              <span class="speed-dial-label">Reddit</span>
+            </div>
+          </div>
+
+          <!-- Media Downloader Callout Banner -->
+          <div class="downloader-feature-banner" id="downloaderFeatureBanner">
+            <div class="banner-left">
+              <div class="banner-icon-badge">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+              </div>
+              <div>
+                <div class="banner-title">Built-in YouTube & Instagram Media Downloader</div>
+                <div class="banner-sub">Extract 4K Video, Reels, Shorts & Studio-Quality Audio directly via yt-dlp engine</div>
+              </div>
+            </div>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent-primary);">
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+              <polyline points="12 5 19 12 12 19"></polyline>
+            </svg>
+          </div>
+        </div>
+      </main>
+
+      <!-- =========================================================
+           4. MEDIA DOWNLOAD SLIDE-OVER PANEL / MODAL
+           (Highest Priority Feature)
+           ========================================================= -->
+      <div class="media-modal-backdrop" id="mediaModalBackdrop">
+        <aside class="media-panel-container" id="mediaPanelContainer" role="dialog" aria-modal="true">
+          <!-- Panel Header -->
+          <div class="panel-header">
+            <div class="panel-header-title-wrap">
+              <div class="panel-header-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+              </div>
+              <div>
+                <div class="panel-title">Media Download</div>
+                <div class="panel-subtitle" id="engineStatusSubtitle">Powered by YAS yt-dlp Engine</div>
+              </div>
+            </div>
+            <div class="panel-header-actions">
+              <div class="engine-badge" id="engineStatusBadge" title="yt-dlp Engine Diagnostics">
+                <span class="engine-dot"></span>
+                <span id="engineBadgeText">yt-dlp</span>
+              </div>
+              <button class="panel-close-btn" id="mediaPanelCloseBtn" title="Close Panel (Esc)">✕</button>
+            </div>
+          </div>
+
+          <!-- Panel Scrollable Content -->
+          <div class="panel-body">
+            <!-- Platform Quick Links & Clipboard -->
+            <div class="quick-preset-bar">
+              <div class="platform-pill-group">
+                <button class="platform-badge yt" id="presetYtBadge" title="Load YouTube 4K Demo">
+                  <span>▶️</span> YouTube 4K Demo
+                </button>
+                <button class="platform-badge ig" id="presetIgBadge" title="Load Instagram Reel Demo">
+                  <span>📸</span> Instagram Reel
+                </button>
+              </div>
+              <button class="paste-clip-btn" id="pasteClipboardBtn" title="Paste link from clipboard">
+                📋 Paste
+              </button>
+            </div>
+
+            <!-- URL Input Section -->
+            <div class="input-section">
+              <div class="input-label">
+                <span>Media URL (YouTube or Instagram)</span>
+                <span style="color: var(--text-tertiary); font-weight: 500;">Supports Videos, Shorts & Reels</span>
+              </div>
+              <div class="input-glow-wrapper" id="mediaInputWrapper">
+                <input 
+                  type="text" 
+                  class="url-input-field" 
+                  id="mediaUrlInput" 
+                  placeholder="https://www.youtube.com/watch?v=... or https://instagram.com/reel/..."
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <button class="input-clear-btn" id="inputClearBtn" title="Clear input">✕</button>
+              </div>
+            </div>
+
+            <!-- Destination Folder Selector -->
+            <div class="folder-destination-row">
+              <div class="folder-label-group">
+                <span class="folder-icon">📁</span>
+                <span class="folder-path-text" id="destinationPathText">~/Downloads</span>
+              </div>
+              <button class="btn-change-folder" id="btnChangeFolder" title="Change Destination Folder">
+                Change Folder
+              </button>
+            </div>
+
+            <!-- Action Buttons Row: Analyze, Best Quality & Clear -->
+            <div class="action-buttons-row">
+              <button class="btn-analyze-primary" id="btnAnalyzeMedia">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <span>Analyze Media</span>
+              </button>
+              <button class="btn-quick-best" id="btnQuickBestQuality" title="Analyze & Immediately Download Highest Resolution Available">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                </svg>
+                <span>Best Quality</span>
+              </button>
+              <button class="btn-clear-secondary" id="btnClearMediaAll" title="Reset and clear all inputs">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="3 6 5 6 21 6"></polyline>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                </svg>
+                <span>Clear</span>
+              </button>
+            </div>
+
+            <!-- Analysis Loading Indicator & Skeleton -->
+            <div class="analysis-loading-card" id="analysisLoadingCard" style="display: none;">
+              <div class="analysis-spinner-wrap">
+                <div class="spinner-large"></div>
+                <div class="loading-phase-texts">
+                  <div class="loading-phase-title" id="loadingPhaseTitle">Inspecting Stream Manifests...</div>
+                  <div class="loading-phase-sub" id="loadingPhaseSub">Connecting to yt-dlp extractor to resolve formats</div>
+                </div>
+              </div>
+              <div class="loading-step-tracker">
+                <div class="tracker-step active" id="step1Dot"><span>1</span> URL Check</div>
+                <div class="tracker-line"></div>
+                <div class="tracker-step" id="step2Dot"><span>2</span> Stream Matrix</div>
+                <div class="tracker-line"></div>
+                <div class="tracker-step" id="step3Dot"><span>3</span> Ready</div>
+              </div>
+            </div>
+
+            <!-- Tailored Error State Box -->
+            <div class="media-error-card" id="mediaErrorCard" style="display: none;">
+              <div class="error-card-header">
+                <span class="error-icon">⚠️</span>
+                <span class="error-title" id="errorTitle">Unable to Analyze URL</span>
+              </div>
+              <p class="error-desc" id="errorDescription">Please check that the link is valid and publicly accessible.</p>
+              <div class="error-actions-row">
+                <button class="btn-error-retry" id="btnErrorRetry">Try Again</button>
+                <button class="btn-error-help" id="btnErrorGuide">Installation & Setup Guide</button>
+              </div>
+            </div>
+
+            <!-- Analyzed Results Area (Formats & Qualities) -->
+            <div class="analyzed-result-container" id="analyzedResultContainer">
+              <!-- Media Info Card -->
+              <div class="media-info-card">
+                <div class="media-thumbnail-wrap">
+                  <img id="mediaThumbnail" class="media-thumbnail-img" src="" alt="Thumbnail" />
+                  <span class="duration-pill" id="mediaDuration">0:00</span>
+                </div>
+                <div class="media-meta-wrap">
+                  <div class="meta-top-row">
+                    <span class="media-platform-badge" id="mediaPlatformBadge">YouTube</span>
+                    <span class="best-available-badge" id="bestAvailableBadge">✨ 4K UHD Available</span>
+                  </div>
+                  <div class="media-title-text" id="mediaTitle">Media Title</div>
+                  <div class="media-creator-text" id="mediaCreator">Creator</div>
+                </div>
+              </div>
+
+              <!-- Format & Quality Tabs (3 Tabs for Complete Selection) -->
+              <div class="format-tabs-header">
+                <button class="format-tab-btn active" id="tabCombinedFormats">
+                  🎬 Combined (Video + Audio)
+                </button>
+                <button class="format-tab-btn" id="tabVideoFormats">
+                  🎥 Video Only
+                </button>
+                <button class="format-tab-btn" id="tabAudioFormats">
+                  🎵 Audio Only (MP3/FLAC)
+                </button>
+              </div>
+
+              <!-- Formats Grid List -->
+              <div class="format-options-grid" id="formatsListContainer">
+                <!-- Dynamically populated format items -->
+              </div>
+
+              <!-- Download Trigger Button -->
+              <button class="btn-start-download" id="btnStartDownload">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                <span>Download Selected Format</span>
+              </button>
+            </div>
+
+            <!-- Active & Recent Downloads Queue Section -->
+            <div class="download-queue-section">
+              <div class="queue-section-header">
+                <span class="queue-section-title">Download Progress & Queue</span>
+                <button class="btn-open-downloads-folder" id="btnOpenDownloadsFolder" title="Open Downloads Folder">
+                  Open Folder ↗
+                </button>
+              </div>
+              <div class="queue-list" id="downloadQueueList">
+                <div class="empty-queue-placeholder" id="emptyQueuePlaceholder">
+                  <div class="empty-icon">📥</div>
+                  <div class="empty-text-title">No Active Downloads</div>
+                  <div class="empty-text-sub">Paste a YouTube or Instagram link above to analyze streams and download.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <!-- =========================================================
+           5. ENGINE DIAGNOSTIC & INSTALLATION GUIDE MODAL
+           ========================================================= -->
+      <div class="engine-modal-backdrop" id="engineInstallModalBackdrop">
+        <div class="engine-modal-dialog" role="dialog" aria-modal="true">
+          <div class="engine-modal-header">
+            <div class="engine-modal-title-group">
+              <div class="engine-modal-icon">⚙️</div>
+              <div>
+                <div class="engine-modal-title">Engine Setup & Diagnostics</div>
+                <div class="engine-modal-subtitle">yt-dlp & FFmpeg Native Core Integration</div>
+              </div>
+            </div>
+            <button class="engine-modal-close" id="btnEngineModalClose">✕</button>
+          </div>
+
+          <div class="engine-modal-body">
+            <!-- Current Status Cards -->
+            <div class="diag-cards-row">
+              <div class="diag-card" id="ytdlpDiagCard">
+                <div class="diag-card-top">
+                  <span class="diag-name">yt-dlp Extractor</span>
+                  <span class="diag-status-pill checking" id="ytdlpStatusPill">Checking...</span>
+                </div>
+                <div class="diag-path-text" id="ytdlpPathText">Scanning system PATH...</div>
+              </div>
+
+              <div class="diag-card" id="ffmpegDiagCard">
+                <div class="diag-card-top">
+                  <span class="diag-name">FFmpeg Muxer</span>
+                  <span class="diag-status-pill checking" id="ffmpegStatusPill">Checking...</span>
+                </div>
+                <div class="diag-path-text" id="ffmpegPathText">Scanning system PATH...</div>
+              </div>
+            </div>
+
+            <!-- Installation Instructions -->
+            <div class="install-guide-box">
+              <div class="guide-tabs-bar">
+                <button class="guide-tab active" id="tabWinGuide">Windows</button>
+                <button class="guide-tab" id="tabMacGuide">macOS</button>
+                <button class="guide-tab" id="tabLinuxGuide">Linux</button>
+              </div>
+
+              <div class="guide-tab-content">
+                <div class="guide-step-title" id="guideHeading">Recommended One-Command Installation:</div>
+                <div class="code-snippet-box">
+                  <code id="guideCommandText">winget install yt-dlp && winget install Gyan.FFmpeg</code>
+                  <button class="btn-copy-code" id="btnCopyGuideCommand" title="Copy command to clipboard">
+                    📋 Copy
+                  </button>
+                </div>
+                <div class="guide-alternatives-list" id="guideAlternativesList">
+                  <!-- Alternative package managers inserted via JS -->
+                </div>
+              </div>
+            </div>
+
+            <div class="engine-modal-note">
+              💡 <strong>Note:</strong> YAS Browser automatically falls back to its built-in high-speed stream extractor if local binaries are not yet configured.
+            </div>
+          </div>
+
+          <div class="engine-modal-footer">
+            <button class="btn-diag-rescan" id="btnRescanDependencies">🔄 Re-scan Binaries</button>
+            <button class="btn-diag-done" id="btnDiagDone">Done</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Toast Notifications Container -->
+      <div class="toast-container" id="toastContainer"></div>
+    </div>
+
+    <!-- Core Vanilla Renderer Scripts -->
+    <script src="/renderer/browser.js"></script>
+    <script src="/renderer/media-download.js"></script>
+  </body>
+</html>

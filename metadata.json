@@ -1,0 +1,6 @@
+{
+  "name": "YAS Browser",
+  "description": "A modern, high-performance dark-themed desktop browser foundation with an integrated media downloader for YouTube and Instagram.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
