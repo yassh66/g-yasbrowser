@@ -442,7 +442,70 @@ class MediaDownloader {
   // =========================================================================
   // 3. Media Metadata & Format Matrix Presentation
   // =========================================================================
-  displayAnalyzedMedia(info) {
+  normalizeMediaInfo(raw) {
+    if (!raw) return null;
+
+    let formatsList = [];
+    if (Array.isArray(raw.formats)) {
+      formatsList = raw.formats;
+    } else if (raw.formats && typeof raw.formats === 'object') {
+      const combined = Array.isArray(raw.formats.combined) ? raw.formats.combined : [];
+      const video = Array.isArray(raw.formats.video) ? raw.formats.video : [];
+      const audio = Array.isArray(raw.formats.audio) ? raw.formats.audio : [];
+      formatsList = [...combined, ...video, ...audio];
+    } else if (raw.groupedFormats && typeof raw.groupedFormats === 'object') {
+      const combined = Array.isArray(raw.groupedFormats.combined) ? raw.groupedFormats.combined : [];
+      const video = Array.isArray(raw.groupedFormats.video) ? raw.groupedFormats.video : [];
+      const audio = Array.isArray(raw.groupedFormats.audio) ? raw.groupedFormats.audio : [];
+      formatsList = [...combined, ...video, ...audio];
+    }
+
+    const normalizedFormats = formatsList.map((f, idx) => {
+      const formatId = f.format_id || f.formatId || `fmt_${idx}`;
+      const ext = f.ext || (f.isAudioOnly || f.type === 'audio_only' || f.type === 'audio' ? 'mp3' : 'mp4');
+      const height = parseInt(f.height || (typeof f.resolution === 'string' && f.resolution.includes('x') ? f.resolution.split('x')[1] : 0), 10) || 0;
+      const fps = parseInt(f.fps, 10) || 30;
+      const isAudioOnly = Boolean(f.isAudioOnly || f.type === 'audio_only' || f.type === 'audio' || f.vcodec === 'none' || (f.acodec && !f.vcodec));
+      const isVideoOnly = Boolean(f.isVideoOnly || f.type === 'video_only' || (f.vcodec && f.vcodec !== 'none' && (!f.acodec || f.acodec === 'none')));
+      const isCombined = Boolean(f.isCombined || f.type === 'combined' || (!isAudioOnly && !isVideoOnly));
+
+      const resolution = f.resolution || f.qualityLabel || (isAudioOnly ? `${f.abr || 320}kbps Audio` : `${height}p`);
+      const filesizeFormatted = f.filesizeFormatted || f.filesizeStr || (f.filesize ? `${(f.filesize / 1048576).toFixed(1)} MB` : '~35 MB');
+
+      return {
+        ...f,
+        format_id: formatId,
+        formatId: formatId,
+        ext: ext,
+        resolution: resolution,
+        qualityLabel: f.qualityLabel || resolution,
+        height: height,
+        fps: fps,
+        vcodec: f.vcodec || (isAudioOnly ? 'none' : 'h264'),
+        acodec: f.acodec || (isVideoOnly ? 'none' : 'mp3'),
+        filesizeFormatted: filesizeFormatted,
+        filesizeStr: filesizeFormatted,
+        isCombined: isCombined,
+        isVideoOnly: isVideoOnly,
+        isAudioOnly: isAudioOnly,
+        type: isAudioOnly ? 'audio' : isVideoOnly ? 'video' : 'combined'
+      };
+    });
+
+    return {
+      ...raw,
+      title: raw.title || 'Untitled Stream',
+      uploader: raw.uploader || raw.channel || 'Content Creator',
+      durationFormatted: raw.durationFormatted || raw.durationString || '0:00',
+      durationString: raw.durationString || raw.durationFormatted || '0:00',
+      thumbnail: raw.thumbnail || '',
+      platform: raw.platform || (raw.url && raw.url.includes('instagram') ? 'Instagram Reel' : 'YouTube'),
+      formats: normalizedFormats
+    };
+  }
+
+  displayAnalyzedMedia(rawInfo) {
+    const info = this.normalizeMediaInfo(rawInfo);
     this.currentMediaInfo = info;
     this.dom.twoColumnGrid.style.display = 'grid';
 
@@ -500,18 +563,18 @@ class MediaDownloader {
     }
 
     // Default select first (best) format if none selected
-    if (!this.selectedFormatId || !filtered.some((f) => f.format_id === this.selectedFormatId)) {
+    if (!this.selectedFormatId || !filtered.some((f) => f.format_id === this.selectedFormatId || f.formatId === this.selectedFormatId)) {
       this.selectedFormatId = filtered[0].format_id;
     }
 
     filtered.forEach((fmt) => {
       const card = document.createElement('div');
-      const isSelected = fmt.format_id === this.selectedFormatId;
+      const isSelected = fmt.format_id === this.selectedFormatId || fmt.formatId === this.selectedFormatId;
       card.className = `format-row-card ${isSelected ? 'selected' : ''}`;
       card.id = `fmt_card_${fmt.format_id}`;
 
       const resBadge = this.getResolutionBadgeText(fmt);
-      const sizeText = fmt.filesizeFormatted || '~45 MB';
+      const sizeText = fmt.filesizeFormatted || fmt.filesizeStr || '~45 MB';
       const codecDesc = fmt.vcodec && fmt.vcodec !== 'none' ? `${fmt.vcodec.split('.')[0]} • ${fmt.fps || 30}fps` : `${fmt.acodec || 'mp3'} • 320kbps`;
 
       card.innerHTML = `
@@ -539,14 +602,15 @@ class MediaDownloader {
   }
 
   filterFormatsByCategory(formats, category) {
+    if (!Array.isArray(formats)) return [];
     if (category === 'audio') {
-      return formats.filter((f) => f.isAudioOnly || f.vcodec === 'none');
+      return formats.filter((f) => f.isAudioOnly || f.type === 'audio' || f.type === 'audio_only' || f.vcodec === 'none');
     }
     if (category === 'video') {
-      return formats.filter((f) => f.isVideoOnly || f.acodec === 'none');
+      return formats.filter((f) => f.isVideoOnly || f.type === 'video' || f.type === 'video_only' || (f.vcodec !== 'none' && f.acodec === 'none'));
     }
     // Combined Video + Audio
-    return formats.filter((f) => f.isCombined || (f.vcodec !== 'none' && f.acodec !== 'none'));
+    return formats.filter((f) => f.isCombined || f.type === 'combined' || (!f.isAudioOnly && !f.isVideoOnly));
   }
 
   getResolutionBadgeText(fmt) {
@@ -557,13 +621,14 @@ class MediaDownloader {
     if (height >= 1080) return '1080p FHD';
     if (height >= 720) return '720p HD';
     if (height >= 480) return '480p SD';
-    return fmt.ext.toUpperCase();
+    return fmt.ext ? fmt.ext.toUpperCase() : 'HD';
   }
 
   getMaxResolution(formats) {
+    if (!Array.isArray(formats) || formats.length === 0) return '1080p FHD';
     let max = 0;
     formats.forEach((f) => {
-      const h = parseInt(f.height || 0, 10);
+      const h = parseInt(f.height || (typeof f.resolution === 'string' && f.resolution.includes('x') ? f.resolution.split('x')[1] : 0), 10);
       if (h > max) max = h;
     });
     if (max >= 2160) return '4K UHD';
@@ -604,7 +669,7 @@ class MediaDownloader {
       return;
     }
 
-    const fmt = this.currentMediaInfo.formats.find((f) => f.format_id === this.selectedFormatId);
+    const fmt = this.currentMediaInfo.formats.find((f) => f.format_id === this.selectedFormatId || f.formatId === this.selectedFormatId);
     const downloadId = `dl_${Date.now()}`;
 
     const downloadJob = {

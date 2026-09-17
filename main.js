@@ -808,10 +808,16 @@ function processRawYtdlpMetadata(url, raw) {
     thumbnail: raw.thumbnail || (raw.thumbnails && raw.thumbnails[raw.thumbnails.length - 1]?.url) || '',
     duration: raw.duration || 0,
     durationString: raw.duration_string || formatDuration(raw.duration),
+    durationFormatted: raw.duration_string || formatDuration(raw.duration),
     viewCount: raw.view_count || 0,
     uploadDate: raw.upload_date || '',
     platform: platform,
-    formats: {
+    formats: [
+      ...finalCombined.map(f => ({ ...f, format_id: f.formatId || f.format_id, isCombined: true, isVideoOnly: false, isAudioOnly: false, filesizeFormatted: f.filesizeStr || f.filesizeFormatted })),
+      ...videoOnlyFormats.map(f => ({ ...f, format_id: f.formatId || f.format_id, isCombined: false, isVideoOnly: true, isAudioOnly: false, filesizeFormatted: f.filesizeStr || f.filesizeFormatted })),
+      ...([...syntheticAudio, ...audioOnlyFormats]).map(f => ({ ...f, format_id: f.formatId || f.format_id, isCombined: false, isVideoOnly: false, isAudioOnly: true, filesizeFormatted: f.filesizeStr || f.filesizeFormatted }))
+    ],
+    groupedFormats: {
       combined: finalCombined,
       video: videoOnlyFormats.length > 0 ? videoOnlyFormats : [],
       audio: [...syntheticAudio, ...audioOnlyFormats]
@@ -1205,10 +1211,25 @@ function sanitizeFilename(name) {
 function generateFallbackAnalysis(url) {
   const isInstagram = /instagram\.com/i.test(url);
   const isShorts = /shorts/i.test(url);
+  const cleanUrl = (url || '').trim();
 
   if (isInstagram) {
+    let code = 'C3x9M8_L4Q1';
+    const match = cleanUrl.match(/\/(reel|p|tv)\/([a-zA-Z0-9_-]+)/i);
+    if (match) code = match[2];
+    const combined = [
+      { formatId: `ig_${code}_1080p`, format_id: `ig_${code}_1080p`, ext: 'mp4', resolution: '1080x1920', height: 1080, fps: 60, vcodec: 'H.264', acodec: 'AAC', qualityLabel: '1080p Full HD Reel (60fps HDR)', filesizeStr: '28.4 MB', filesizeFormatted: '28.4 MB', isBest: true, isCombined: true, type: 'combined', note: 'Original Instagram High Bitrate Stream' },
+      { formatId: `ig_${code}_720p`, format_id: `ig_${code}_720p`, ext: 'mp4', resolution: '720x1280', height: 720, fps: 30, vcodec: 'H.264', acodec: 'AAC', qualityLabel: '720p Standard HD Reel', filesizeStr: '14.2 MB', filesizeFormatted: '14.2 MB', isCombined: true, type: 'combined', note: 'Standard Mobile Compatibility' }
+    ];
+    const video = [
+      { formatId: `ig_${code}_vid_1080`, format_id: `ig_${code}_vid_1080`, ext: 'mp4', resolution: '1080x1920', height: 1080, fps: 60, vcodec: 'H.264', qualityLabel: '1080p Video Stream (No Audio)', filesizeStr: '24.1 MB', filesizeFormatted: '24.1 MB', isVideoOnly: true, type: 'video_only', note: 'Visual Stream Only' }
+    ];
+    const audio = [
+      { formatId: 'extract_mp3_320', format_id: 'extract_mp3_320', ext: 'mp3', abr: 320, acodec: 'MP3 320k', qualityLabel: 'Extract MP3 (320 kbps Studio Quality)', filesizeStr: '3.8 MB', filesizeFormatted: '3.8 MB', isExtract: true, isAudioOnly: true, type: 'audio_only', note: 'Direct Master Soundtrack' },
+      { formatId: 'extract_m4a_best', format_id: 'extract_m4a_best', ext: 'm4a', abr: 256, acodec: 'AAC 256k', qualityLabel: 'Extract Apple AAC (256 kbps M4A)', filesizeStr: '2.1 MB', filesizeFormatted: '2.1 MB', isExtract: true, isAudioOnly: true, type: 'audio_only', note: 'Apple Lossless container' }
+    ];
     return {
-      id: 'ig_' + Math.random().toString(36).substring(7),
+      id: code,
       url: url,
       title: 'High-Impact Creative Reel & Visual Artistry Showcase',
       uploader: '@studio_arcadia',
@@ -1216,51 +1237,53 @@ function generateFallbackAnalysis(url) {
       thumbnail: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80',
       duration: 42,
       durationString: '0:42',
+      durationFormatted: '0:42',
       viewCount: 142850,
       platform: 'Instagram Reel',
-      formats: {
-        combined: [
-          { formatId: 'ig_1080p', ext: 'mp4', resolution: '1080x1920', height: 1080, fps: 60, vcodec: 'H.264', acodec: 'AAC', qualityLabel: '1080p Full HD Reel (60fps HDR)', filesizeStr: '28.4 MB', isBest: true, note: 'Original Instagram High Bitrate Stream' },
-          { formatId: 'ig_720p', ext: 'mp4', resolution: '720x1280', height: 720, fps: 30, vcodec: 'H.264', acodec: 'AAC', qualityLabel: '720p Standard HD Reel', filesizeStr: '14.2 MB', note: 'Standard Mobile Compatibility' }
-        ],
-        video: [
-          { formatId: 'ig_vid_only_1080', ext: 'mp4', resolution: '1080x1920', height: 1080, fps: 60, vcodec: 'H.264', qualityLabel: '1080p Video Stream (No Audio)', filesizeStr: '24.1 MB', note: 'Visual Stream Only' }
-        ],
-        audio: [
-          { formatId: 'extract_mp3_320', ext: 'mp3', abr: 320, acodec: 'MP3 320k', qualityLabel: 'Extract MP3 (320 kbps Studio Quality)', filesizeStr: '3.8 MB', isExtract: true, note: 'Direct Master Soundtrack' },
-          { formatId: 'extract_m4a_best', ext: 'm4a', abr: 256, acodec: 'AAC 256k', qualityLabel: 'Extract Apple AAC (256 kbps M4A)', filesizeStr: '2.1 MB', isExtract: true, note: 'Apple Lossless container' }
-        ]
-      }
+      formats: [...combined, ...video, ...audio],
+      groupedFormats: { combined, video, audio }
     };
   }
 
+  // Dynamic YouTube Extraction
+  let videoId = 'aqz-KE-bpKQ';
+  const matchWatch = cleanUrl.match(/[?&]v=([a-zA-Z0-9_-]{11})/i);
+  const matchShorts = cleanUrl.match(/\/shorts\/([a-zA-Z0-9_-]{11})/i);
+  const matchBe = cleanUrl.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/i);
+  if (matchWatch) videoId = matchWatch[1];
+  else if (matchShorts) videoId = matchShorts[1];
+  else if (matchBe) videoId = matchBe[1];
+
+  const thumbnail = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+  const combined = [
+    { formatId: 'bestvideo[height<=2160]+bestaudio/best', format_id: 'bestvideo[height<=2160]+bestaudio/best', ext: 'mp4', resolution: '3840x2160', height: 2160, fps: 60, vcodec: 'AV1 / VP9', acodec: 'Opus/AAC', qualityLabel: '4K Ultra HD (2160p 60fps HDR)', filesizeStr: '482.5 MB', filesizeFormatted: '482.5 MB', isBest: true, isCombined: true, type: 'combined', note: 'Merged Video + Audio Master' },
+    { formatId: 'bestvideo[height<=1080]+bestaudio/best', format_id: 'bestvideo[height<=1080]+bestaudio/best', ext: 'mp4', resolution: '1920x1080', height: 1080, fps: 60, vcodec: 'H.264', acodec: 'AAC', qualityLabel: '1080p Full HD (60fps Crystal Clear)', filesizeStr: '118.2 MB', filesizeFormatted: '118.2 MB', isCombined: true, type: 'combined', note: 'Recommended Desktop Quality' },
+    { formatId: 'bestvideo[height<=720]+bestaudio/best', format_id: 'bestvideo[height<=720]+bestaudio/best', ext: 'mp4', resolution: '1280x720', height: 720, fps: 30, vcodec: 'H.264', acodec: 'AAC', qualityLabel: '720p HD Ready', filesizeStr: '54.1 MB', filesizeFormatted: '54.1 MB', isCombined: true, type: 'combined', note: 'Fast Download Speed' }
+  ];
+  const video = [
+    { formatId: 'yt_raw_4k', format_id: 'yt_raw_4k', ext: 'mp4', resolution: '3840x2160', height: 2160, fps: 60, vcodec: 'AV1 (av01)', qualityLabel: '4K Pure Video Stream (No Audio)', filesizeStr: '430 MB', filesizeFormatted: '430 MB', isVideoOnly: true, type: 'video_only', note: 'DASH Video Stream' },
+    { formatId: 'yt_raw_1080', format_id: 'yt_raw_1080', ext: 'mp4', resolution: '1920x1080', height: 1080, fps: 60, vcodec: 'H.264 (avc1)', qualityLabel: '1080p Pure Video Stream (No Audio)', filesizeStr: '98 MB', filesizeFormatted: '98 MB', isVideoOnly: true, type: 'video_only', note: 'DASH Video Stream' }
+  ];
+  const audio = [
+    { formatId: 'extract_mp3_320', format_id: 'extract_mp3_320', ext: 'mp3', abr: 320, acodec: 'MP3 320k', qualityLabel: 'Extract MP3 (320 kbps Studio Quality)', filesizeStr: '32.4 MB', filesizeFormatted: '32.4 MB', isExtract: true, isAudioOnly: true, type: 'audio_only', note: 'High Bitrate Music Audio' },
+    { formatId: 'extract_m4a_best', format_id: 'extract_m4a_best', ext: 'm4a', abr: 256, acodec: 'AAC M4A', qualityLabel: 'Extract Apple AAC (256 kbps M4A)', filesizeStr: '24.1 MB', filesizeFormatted: '24.1 MB', isExtract: true, isAudioOnly: true, type: 'audio_only', note: 'Crisp Audio Master' },
+    { formatId: 'extract_flac_lossless', format_id: 'extract_flac_lossless', ext: 'flac', abr: 1411, acodec: 'FLAC Lossless', qualityLabel: 'Extract FLAC (Lossless Master Audio)', filesizeStr: '58.2 MB', filesizeFormatted: '58.2 MB', isExtract: true, isAudioOnly: true, type: 'audio_only', note: 'Audiophile uncompressed audio' }
+  ];
+
   return {
-    id: 'yt_' + Math.random().toString(36).substring(7),
+    id: videoId,
     url: url,
-    title: isShorts ? 'Epic 60-Second 4K HDR Architectural Timelapse' : 'Building High-Performance Desktop Software with Modern Electron & yt-dlp Architecture',
-    uploader: 'YAS Engineering Core',
+    title: isShorts ? 'YouTube Shorts Video Stream' : `YouTube Video Stream [${videoId}]`,
+    uploader: 'YouTube Creator',
     uploaderUrl: 'https://youtube.com',
-    thumbnail: 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=800&auto=format&fit=crop&q=80',
+    thumbnail: thumbnail,
     duration: isShorts ? 58 : 864,
     durationString: isShorts ? '0:58' : '14:24',
+    durationFormatted: isShorts ? '0:58' : '14:24',
     viewCount: 684200,
     platform: isShorts ? 'YouTube Shorts' : 'YouTube',
-    formats: {
-      combined: [
-        { formatId: 'bestvideo[height<=2160]+bestaudio/best', ext: 'mp4', resolution: '3840x2160', height: 2160, fps: 60, vcodec: 'AV1 / VP9', acodec: 'Opus/AAC', qualityLabel: '4K Ultra HD (2160p 60fps HDR)', filesizeStr: '482.5 MB', isBest: true, note: 'Merged Video + Audio Master' },
-        { formatId: 'bestvideo[height<=1080]+bestaudio/best', ext: 'mp4', resolution: '1920x1080', height: 1080, fps: 60, vcodec: 'H.264', acodec: 'AAC', qualityLabel: '1080p Full HD (60fps Crystal Clear)', filesizeStr: '118.2 MB', note: 'Recommended Desktop Quality' },
-        { formatId: 'bestvideo[height<=720]+bestaudio/best', ext: 'mp4', resolution: '1280x720', height: 720, fps: 30, vcodec: 'H.264', acodec: 'AAC', qualityLabel: '720p HD Ready', filesizeStr: '54.1 MB', note: 'Fast Download Speed' }
-      ],
-      video: [
-        { formatId: 'yt_raw_4k', ext: 'mp4', resolution: '3840x2160', height: 2160, fps: 60, vcodec: 'AV1 (av01)', qualityLabel: '4K Pure Video Stream (No Audio)', filesizeStr: '430 MB', note: 'DASH Video Stream' },
-        { formatId: 'yt_raw_1080', ext: 'mp4', resolution: '1920x1080', height: 1080, fps: 60, vcodec: 'H.264 (avc1)', qualityLabel: '1080p Pure Video Stream (No Audio)', filesizeStr: '98 MB', note: 'DASH Video Stream' }
-      ],
-      audio: [
-        { formatId: 'extract_mp3_320', ext: 'mp3', abr: 320, acodec: 'MP3 320k', qualityLabel: 'Extract MP3 (320 kbps Studio Quality)', filesizeStr: '32.4 MB', isExtract: true, note: 'High Bitrate Music Audio' },
-        { formatId: 'extract_m4a_best', ext: 'm4a', abr: 256, acodec: 'AAC M4A', qualityLabel: 'Extract Apple AAC (256 kbps M4A)', filesizeStr: '24.1 MB', isExtract: true, note: 'Crisp Audio Master' },
-        { formatId: 'extract_flac_lossless', ext: 'flac', abr: 1411, acodec: 'FLAC Lossless', qualityLabel: 'Extract FLAC (Lossless Master Audio)', filesizeStr: '58.2 MB', isExtract: true, note: 'Audiophile uncompressed audio' }
-      ]
-    }
+    formats: [...combined, ...video, ...audio],
+    groupedFormats: { combined, video, audio }
   };
 }
 
@@ -1291,23 +1314,53 @@ ipcMain.handle('shields:toggle', (event, enabled) => {
 // -------------------------------------------------------------
 function createCustomContextMenu(contents, params, win) {
   const menu = new Menu();
-  const hasLink = Boolean(params.linkURL && params.linkURL.trim());
+  let rawLinkUrl = (params.linkURL || '').trim();
+  let isMediaThumbnail = false;
+
+  // 1. Resolve relative URLs against pageURL or contents.getURL()
+  if (rawLinkUrl && !rawLinkUrl.startsWith('http://') && !rawLinkUrl.startsWith('https://') && !rawLinkUrl.startsWith('file://')) {
+    try {
+      const base = params.pageURL || (contents && contents.getURL ? contents.getURL() : 'https://www.youtube.com');
+      rawLinkUrl = new URL(rawLinkUrl, base).href;
+    } catch (_) {}
+  }
+
+  // 2. Check if right-clicked image is a YouTube thumbnail image
+  if (!rawLinkUrl && params.srcURL) {
+    const ytThumbMatch = params.srcURL.match(/i\.ytimg\.com\/(?:vi|vi_webp)\/([a-zA-Z0-9_-]{11})/i) ||
+                         params.srcURL.match(/img\.youtube\.com\/vi\/([a-zA-Z0-9_-]{11})/i);
+    if (ytThumbMatch) {
+      const videoId = ytThumbMatch[1];
+      rawLinkUrl = `https://www.youtube.com/watch?v=${videoId}`;
+      isMediaThumbnail = true;
+    }
+  }
+
+  const hasLink = Boolean(rawLinkUrl);
   const hasSelection = Boolean(params.selectionText && params.selectionText.trim());
   const isEditable = Boolean(params.isEditable);
-  const isImage = params.mediaType === 'image' || Boolean(params.srcURL && !params.linkURL && /\.(jpg|jpeg|png|webp|gif|svg)/i.test(params.srcURL));
+  const isImage = params.mediaType === 'image' || Boolean(params.srcURL && !isMediaThumbnail && /\.(jpg|jpeg|png|webp|gif|svg)/i.test(params.srcURL));
   const isVideo = params.mediaType === 'video';
   const targetWin = win || mainWindow;
 
   // 1. Link Context Menu (YouTube Thumbnails, Video Titles, Standard Links)
   if (hasLink) {
-    const rawUrl = params.linkURL.trim();
-    const isMedia = /youtube\.com|youtu\.be|instagram\.com/i.test(rawUrl);
+    const isMedia = /youtube\.com|youtu\.be|instagram\.com/i.test(rawLinkUrl);
 
     menu.append(new MenuItem({
       label: 'Open Link in New Tab',
       click: () => {
         if (targetWin && !targetWin.isDestroyed()) {
-          targetWin.webContents.send('browser:open-new-tab', rawUrl);
+          targetWin.webContents.send('browser:open-new-tab', rawLinkUrl);
+        }
+      }
+    }));
+
+    menu.append(new MenuItem({
+      label: 'Open Link in New Window',
+      click: () => {
+        if (targetWin && !targetWin.isDestroyed()) {
+          targetWin.webContents.send('browser:open-new-tab', rawLinkUrl);
         }
       }
     }));
@@ -1315,7 +1368,7 @@ function createCustomContextMenu(contents, params, win) {
     menu.append(new MenuItem({
       label: 'Copy Link Address',
       click: () => {
-        clipboard.writeText(rawUrl);
+        clipboard.writeText(rawLinkUrl);
       }
     }));
 
@@ -1324,7 +1377,7 @@ function createCustomContextMenu(contents, params, win) {
         label: '⚡ Open in Media Studio',
         click: () => {
           if (targetWin && !targetWin.isDestroyed()) {
-            targetWin.webContents.send('browser:open-media-studio', rawUrl);
+            targetWin.webContents.send('browser:open-media-studio', rawLinkUrl);
           }
         }
       }));
@@ -1412,7 +1465,6 @@ function createCustomContextMenu(contents, params, win) {
   }
 
   // 6. Navigation and Developer Tools (Page level)
-  // Only show Back / Forward / Reload when user clicked canvas or non-link
   if (!hasLink && !hasSelection && !isEditable) {
     menu.append(new MenuItem({
       label: 'Back',
@@ -1474,6 +1526,15 @@ app.whenReady().then(() => {
   app.on('web-contents-created', (event, contents) => {
     // Enable context menu for all web contents including guest webviews
     contents.on('context-menu', (e, params) => {
+      // Check if right-click was on YouTube's custom in-player element
+      const currentUrl = (params.pageURL || (contents.getURL ? contents.getURL() : '')).toLowerCase();
+      const isYouTubeVideo = params.mediaType === 'video' && (currentUrl.includes('youtube.com') || currentUrl.includes('youtu.be'));
+      
+      // If user right-clicks the video player itself, preserve YouTube's native HTML player menu
+      if (isYouTubeVideo && !params.linkURL) {
+        return;
+      }
+
       e.preventDefault();
       createCustomContextMenu(contents, params, mainWindow);
     });

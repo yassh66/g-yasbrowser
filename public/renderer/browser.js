@@ -834,55 +834,99 @@ class YASBrowser {
     const isYouTube = url.includes('youtube.com') || url.includes('youtu.be');
     if (!isYouTube) return;
 
-    // Execute ad suppression script inside webview
+    // Execute ad suppression and MutationObserver skip-clicker script inside webview
     const adBlockerScript = `
       (function() {
         if (window.__yasAdBlockerInitialized) return;
         window.__yasAdBlockerInitialized = true;
 
         // 1. Inject High-Priority Ad Element CSS Masking
-        const style = document.createElement('style');
-        style.id = 'yas-ad-suppress-style';
-        style.textContent = \`
-          .video-ads,
-          .ytp-ad-overlay-container,
-          .ytp-ad-player-overlay,
-          .ytp-ad-player-overlay-layout,
-          ytd-ad-slot-renderer,
-          ytd-banner-promo-renderer,
-          #masthead-ad,
-          ytd-rich-item-renderer:has(ytd-ad-slot-renderer),
-          ytd-display-ad-renderer,
-          #player-ads,
-          .sparkles-light-cta,
-          ytd-promoted-video-renderer,
-          ytd-promoted-sparkles-web-renderer,
-          tp-yt-paper-dialog:has(#feedback),
-          ytd-popup-container:has(ytd-mealbar-promo-renderer) {
-            display: none !important;
-            visibility: hidden !important;
-            height: 0 !important;
-            width: 0 !important;
-            opacity: 0 !important;
-            pointer-events: none !important;
-          }
-        \`;
-        (document.head || document.documentElement).appendChild(style);
+        const styleId = 'yas-ad-suppress-style';
+        if (!document.getElementById(styleId)) {
+          const style = document.createElement('style');
+          style.id = styleId;
+          style.textContent = \`
+            .video-ads,
+            .ytp-ad-overlay-container,
+            .ytp-ad-player-overlay,
+            .ytp-ad-player-overlay-layout,
+            ytd-ad-slot-renderer,
+            ytd-banner-promo-renderer,
+            #masthead-ad,
+            ytd-rich-item-renderer:has(ytd-ad-slot-renderer),
+            ytd-display-ad-renderer,
+            #player-ads,
+            .sparkles-light-cta,
+            ytd-promoted-video-renderer,
+            ytd-promoted-sparkles-web-renderer,
+            tp-yt-paper-dialog:has(#feedback),
+            ytd-popup-container:has(ytd-mealbar-promo-renderer),
+            ytd-in-feed-ad-layout-renderer {
+              display: none !important;
+              visibility: hidden !important;
+              height: 0 !important;
+              width: 0 !important;
+              opacity: 0 !important;
+              pointer-events: none !important;
+            }
+          \`;
+          (document.head || document.documentElement).appendChild(style);
+        }
 
-        // 2. Safe Video Ad Skip Button Auto-Clicker
-        setInterval(function() {
-          const isAdActive = document.querySelector('.ad-showing, .ad-interrupting');
-          if (isAdActive) {
-            const skipButtons = document.querySelectorAll(
-              '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, .ytp-ad-skip-button-slot button, .ytp-ad-overlay-close-button'
-            );
-            skipButtons.forEach(btn => {
+        // 2. Robust MutationObserver-based Skip Ad Clicker
+        const skipSelectors = [
+          '.ytp-ad-skip-button',
+          '.ytp-ad-skip-button-modern',
+          '.ytp-skip-ad-button',
+          '.ytp-ad-skip-button-slot button',
+          '.ytp-ad-skip-button-container button',
+          '.ytp-ad-overlay-close-button',
+          'button.ytp-ad-skip-button-modern',
+          '[id^="skip-button"] button'
+        ];
+
+        let lastClickTime = 0;
+        function tryClickSkipAd() {
+          const now = Date.now();
+          if (now - lastClickTime < 300) return;
+
+          for (const sel of skipSelectors) {
+            const buttons = document.querySelectorAll(sel);
+            for (const btn of buttons) {
               if (btn && typeof btn.click === 'function') {
-                btn.click();
+                const rect = btn.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) {
+                  btn.click();
+                  lastClickTime = now;
+                  return;
+                }
               }
-            });
+            }
           }
-        }, 300);
+        }
+
+        // Initialize MutationObserver on player/DOM
+        const observer = new MutationObserver(function(mutations) {
+          const isAdActive = document.querySelector('.ad-showing, .ad-interrupting, .ytp-ad-player-overlay');
+          if (isAdActive) {
+            tryClickSkipAd();
+          }
+        });
+
+        observer.observe(document.body || document.documentElement, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['class', 'style', 'id']
+        });
+
+        // Periodic heartbeat check in case mutations settle while ad is playing
+        setInterval(function() {
+          const isAdActive = document.querySelector('.ad-showing, .ad-interrupting, .ytp-ad-player-overlay');
+          if (isAdActive) {
+            tryClickSkipAd();
+          }
+        }, 1000);
       })();
     `;
 
