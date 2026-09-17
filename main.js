@@ -104,11 +104,21 @@ let cachedFfmpegPath = null;
  * Creates the primary browser window
  */
 function createMainWindow() {
+  const iconCandidates = [
+    path.join(__dirname, 'assets', 'yas-browser.ico'),
+    path.join(__dirname, 'build', 'yas-browser.ico'),
+    path.join(__dirname, 'public', 'yas-browser.ico'),
+    path.join(__dirname, 'yas-browser.ico'),
+    path.join(__dirname, 'assets', 'icon.png')
+  ];
+  const appIcon = iconCandidates.find((p) => fs.existsSync(p));
+
   mainWindow = new BrowserWindow({
     width: 1320,
     height: 880,
     minWidth: 980,
     minHeight: 640,
+    icon: appIcon,
     frame: false, // Frameless for modern custom title bar (Brave/Arc style)
     titleBarStyle: 'hidden',
     backgroundColor: '#090a0f',

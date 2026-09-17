@@ -44,5 +44,24 @@
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.3"
+  },
+  "build": {
+    "appId": "com.yas.browser",
+    "productName": "YAS Browser",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "win": {
+      "icon": "assets/yas-browser.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "assets/yas-browser.ico",
+      "uninstallerIcon": "assets/yas-browser.ico"
+    }
   }
 }
