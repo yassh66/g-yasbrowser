@@ -21,13 +21,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Media Download & Engine IPC
   analyzeUrl: (url) => ipcRenderer.invoke('media:analyze', url),
+  analyzeMedia: (url) => ipcRenderer.invoke('media:analyze', url),
   startDownload: (config) => ipcRenderer.invoke('media:start-download', config),
   cancelDownload: (downloadId) => ipcRenderer.invoke('media:cancel-download', downloadId),
   openFolder: (folderPath) => ipcRenderer.invoke('media:open-folder', folderPath),
   showInFolder: (filePath) => ipcRenderer.invoke('media:show-in-folder', filePath),
   chooseDirectory: () => ipcRenderer.invoke('dialog:choose-directory'),
+  selectDirectory: () => ipcRenderer.invoke('dialog:choose-directory'),
   checkDependencies: () => ipcRenderer.invoke('system:check-dependencies'),
+  getDiagnostics: () => ipcRenderer.invoke('system:check-dependencies'),
   copyToClipboard: (text) => ipcRenderer.invoke('system:copy-to-clipboard', text),
+  
+  // Context Menu & Tab IPC Bridge
+  showContextMenu: (params) => ipcRenderer.invoke('context-menu:show', params),
+  onOpenNewTab: (callback) => {
+    ipcRenderer.on('browser:open-new-tab', (event, url) => callback(url));
+  },
+  onOpenMediaStudio: (callback) => {
+    ipcRenderer.on('browser:open-media-studio', (event, url) => callback(url));
+  },
   
   // Shields & Ad-Blocking IPC
   getShieldsStatus: () => ipcRenderer.invoke('shields:get-status'),

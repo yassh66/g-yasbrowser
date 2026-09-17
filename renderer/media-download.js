@@ -17,6 +17,7 @@ class MediaDownloader {
   constructor() {
     this.isOpen = false;
     this.isAnalyzing = false;
+    this.currentRequestId = 0;
     this.currentMediaInfo = null;
     this.selectedFormatId = null;
     this.activeCategory = 'combined'; // 'combined' | 'video' | 'audio'
@@ -233,6 +234,7 @@ class MediaDownloader {
    * Fully resets URL input, analysis results, selected formats, errors, and restores clean empty state
    */
   resetAll(showFeedback = true) {
+    this.currentRequestId++;
     this.isAnalyzing = false;
     this.currentMediaInfo = null;
     this.selectedFormatId = null;
@@ -249,6 +251,12 @@ class MediaDownloader {
     // Hide analyzed 2-column grid and show empty state
     this.dom.twoColumnGrid.style.display = 'none';
     this.dom.emptyState.style.display = 'flex';
+
+    // Reset preview card fields
+    if (this.dom.thumbnail) this.dom.thumbnail.src = '';
+    if (this.dom.mediaTitle) this.dom.mediaTitle.textContent = '';
+    if (this.dom.durationBadge) this.dom.durationBadge.textContent = '0:00';
+    if (this.dom.mediaCreator) this.dom.mediaCreator.textContent = '';
 
     // Reset format tabs to combined
     this.switchFormatTab('combined');
@@ -283,9 +291,7 @@ class MediaDownloader {
 
     if (clearBtn) {
       clearBtn.addEventListener('click', () => {
-        input.value = '';
-        this.updateInputClearButton();
-        input.focus();
+        this.resetAll(false);
       });
     }
 
@@ -347,28 +353,55 @@ class MediaDownloader {
       return;
     }
 
-    this.isAnalyzing = true;
-    this.showLoadingPhase(1, 'Validating URL & Stream Manifests...', 'Extracting stream endpoints via yt-dlp');
+    // Invalidate any prior analysis request so it cannot overwrite new results
+    const requestId = ++this.currentRequestId;
 
+    this.isAnalyzing = true;
+    this.currentMediaInfo = null;
+    this.selectedFormatId = null;
+
+    // Clear previous results immediately from UI
+    this.dom.formatsList.innerHTML = '';
     this.dom.errorCard.style.display = 'none';
     this.dom.emptyState.style.display = 'none';
     this.dom.twoColumnGrid.style.display = 'none';
 
-    try {
-      let info = null;
+    this.showLoadingPhase(1, 'Validating URL & Stream Manifests...', 'Extracting stream endpoints via yt-dlp');
 
-      if (window.electronAPI && window.electronAPI.analyzeMedia) {
-        info = await window.electronAPI.analyzeMedia(rawUrl);
+    try {
+      let rawResult = null;
+
+      if (window.electronAPI && (window.electronAPI.analyzeMedia || window.electronAPI.analyzeUrl)) {
+        const analyzeFn = window.electronAPI.analyzeMedia || window.electronAPI.analyzeUrl;
+        rawResult = await analyzeFn(rawUrl);
       } else {
         // High-Fidelity Mock Extractor Fallback for Web Preview
-        info = await this.simulateExtraction(rawUrl);
+        rawResult = await this.simulateExtraction(rawUrl);
+      }
+
+      // Check if this request was superseded by a newer one
+      if (requestId !== this.currentRequestId) {
+        return;
+      }
+
+      let info = null;
+      if (rawResult && rawResult.success !== false) {
+        info = rawResult.data ? rawResult.data : rawResult;
+      } else if (rawResult && rawResult.error) {
+        throw new Error(rawResult.error);
+      } else {
+        throw new Error('Unable to extract stream formats from the provided link.');
       }
 
       this.showLoadingPhase(2, 'Resolving Stream Formats & Bitrates...', 'Sorting video resolutions and audio codecs');
-      await new Promise((r) => setTimeout(r, 400));
+      await new Promise((r) => setTimeout(r, 250));
+
+      if (requestId !== this.currentRequestId) return;
 
       this.showLoadingPhase(3, 'Extraction Complete', 'Stream manifests verified');
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 150));
+
+      if (requestId !== this.currentRequestId) return;
 
       this.isAnalyzing = false;
       this.dom.loadingCard.style.display = 'none';
@@ -378,6 +411,7 @@ class MediaDownloader {
         this.downloadBestQuality();
       }
     } catch (err) {
+      if (requestId !== this.currentRequestId) return;
       this.isAnalyzing = false;
       this.dom.loadingCard.style.display = 'none';
       this.showErrorState(
@@ -924,39 +958,63 @@ class MediaDownloader {
   // 7. Simulators & Fallbacks (Web Preview Environment)
   // =========================================================================
   async simulateExtraction(url) {
-    await new Promise((r) => setTimeout(r, 600));
+    await new Promise((r) => setTimeout(r, 400));
 
     const isInstagram = /instagram\.com/i.test(url);
+    const cleanUrl = (url || '').trim();
 
     if (isInstagram) {
+      const match = cleanUrl.match(/\/(reel|p|tv)\/([a-zA-Z0-9_-]+)/i);
+      const code = match ? match[2] : 'C3x9M8_L4Q1';
       return {
-        title: 'Cinematic Reel - Aesthetic Travel Moments in Tokyo',
-        uploader: 'japan.explores',
+        id: code,
+        title: `Instagram Reel (${code}) - Creator Moments`,
+        uploader: 'instagram.creator',
         platform: 'Instagram',
         durationFormatted: '0:45',
         thumbnail: 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=800&auto=format&fit=crop&q=80',
         formats: [
-          { format_id: 'ig_1080p', resolution: '1080x1920 (Reel HD)', height: 1920, fps: 60, vcodec: 'avc1', acodec: 'mp4a', ext: 'mp4', isCombined: true, filesizeFormatted: '28.4 MB' },
-          { format_id: 'ig_720p', resolution: '720x1280 (Fast)', height: 1280, fps: 30, vcodec: 'avc1', acodec: 'mp4a', ext: 'mp4', isCombined: true, filesizeFormatted: '14.2 MB' },
-          { format_id: 'ig_audio', resolution: '320kbps MP3 Audio', height: 0, vcodec: 'none', acodec: 'mp3', ext: 'mp3', isAudioOnly: true, filesizeFormatted: '3.8 MB' }
+          { format_id: `ig_${code}_1080p`, resolution: '1080x1920 (Reel HD)', height: 1920, fps: 60, vcodec: 'avc1', acodec: 'mp4a', ext: 'mp4', isCombined: true, filesizeFormatted: '28.4 MB' },
+          { format_id: `ig_${code}_720p`, resolution: '720x1280 (Fast)', height: 1280, fps: 30, vcodec: 'avc1', acodec: 'mp4a', ext: 'mp4', isCombined: true, filesizeFormatted: '14.2 MB' },
+          { format_id: `ig_${code}_audio`, resolution: '320kbps MP3 Audio', height: 0, vcodec: 'none', acodec: 'mp3', ext: 'mp3', isAudioOnly: true, filesizeFormatted: '3.8 MB' }
         ]
       };
     }
 
+    // Dynamic YouTube Extraction
+    let videoId = 'aqz-KE-bpKQ';
+    const matchWatch = cleanUrl.match(/[?&]v=([a-zA-Z0-9_-]{11})/i);
+    const matchShorts = cleanUrl.match(/\/shorts\/([a-zA-Z0-9_-]{11})/i);
+    const matchBe = cleanUrl.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/i);
+    if (matchWatch) videoId = matchWatch[1];
+    else if (matchShorts) videoId = matchShorts[1];
+    else if (matchBe) videoId = matchBe[1];
+
+    const knownTitles = {
+      'aqz-KE-bpKQ': 'Big Buck Bunny 4K 60FPS Ultra HD Open Source Movie',
+      'dQw4w9WgXcQ': 'Rick Astley - Never Gonna Give You Up (Official Music Video)',
+      'jNQXAC9IVRw': 'Me at the zoo - Jawed (First YouTube Video)',
+      'M7lc1UVf-VE': 'YouTube Developers - Getting Started with YouTube API'
+    };
+
+    const title = knownTitles[videoId] || `YouTube Video Stream [${videoId}]`;
+    const thumbnail = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+
     return {
-      title: 'Costa Rica in 4K UHD 60FPS - Natural Wonders Documentary',
-      uploader: 'Nature Cinematic World',
+      id: videoId,
+      title: title,
+      uploader: 'YouTube Studio Channel',
       platform: 'YouTube',
-      durationFormatted: '12:48',
-      thumbnail: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=800&auto=format&fit=crop&q=80',
+      durationFormatted: '10:24',
+      thumbnail: thumbnail,
       formats: [
-        { format_id: 'yt_4k', resolution: '3840x2160 (4K UHD)', height: 2160, fps: 60, vcodec: 'vp9', acodec: 'opus', ext: 'mp4', isCombined: true, filesizeFormatted: '312.4 MB' },
-        { format_id: 'yt_1440p', resolution: '2560x1440 (2K QHD)', height: 1440, fps: 60, vcodec: 'vp9', acodec: 'opus', ext: 'mp4', isCombined: true, filesizeFormatted: '184.2 MB' },
-        { format_id: 'yt_1080p', resolution: '1920x1080 (1080p FHD)', height: 1080, fps: 60, vcodec: 'avc1', acodec: 'mp4a', ext: 'mp4', isCombined: true, filesizeFormatted: '92.5 MB' },
-        { format_id: 'yt_720p', resolution: '1280x720 (720p HD)', height: 720, fps: 30, vcodec: 'avc1', acodec: 'mp4a', ext: 'mp4', isCombined: true, filesizeFormatted: '48.1 MB' },
-        { format_id: 'yt_video_only_4k', resolution: '3840x2160 (AV1 Video Only)', height: 2160, fps: 60, vcodec: 'av01', acodec: 'none', ext: 'mp4', isVideoOnly: true, filesizeFormatted: '280.0 MB' },
-        { format_id: 'yt_audio_320', resolution: '320kbps Studio MP3 Audio', height: 0, vcodec: 'none', acodec: 'mp3', ext: 'mp3', isAudioOnly: true, filesizeFormatted: '28.8 MB' },
-        { format_id: 'yt_audio_flac', resolution: 'Lossless FLAC Master', height: 0, vcodec: 'none', acodec: 'flac', ext: 'flac', isAudioOnly: true, filesizeFormatted: '64.2 MB' }
+        { format_id: `yt_${videoId}_4k`, resolution: '3840x2160 (4K UHD)', height: 2160, fps: 60, vcodec: 'vp9', acodec: 'opus', ext: 'mp4', isCombined: true, filesizeFormatted: '312.4 MB' },
+        { format_id: `yt_${videoId}_1440p`, resolution: '2560x1440 (2K QHD)', height: 1440, fps: 60, vcodec: 'vp9', acodec: 'opus', ext: 'mp4', isCombined: true, filesizeFormatted: '184.2 MB' },
+        { format_id: `yt_${videoId}_1080p`, resolution: '1920x1080 (1080p FHD)', height: 1080, fps: 60, vcodec: 'avc1', acodec: 'mp4a', ext: 'mp4', isCombined: true, filesizeFormatted: '92.5 MB' },
+        { format_id: `yt_${videoId}_720p`, resolution: '1280x720 (720p HD)', height: 720, fps: 30, vcodec: 'avc1', acodec: 'mp4a', ext: 'mp4', isCombined: true, filesizeFormatted: '48.1 MB' },
+        { format_id: `yt_${videoId}_video_only_4k`, resolution: '3840x2160 (AV1 Video Only)', height: 2160, fps: 60, vcodec: 'av01', acodec: 'none', ext: 'mp4', isVideoOnly: true, filesizeFormatted: '280.0 MB' },
+        { format_id: `yt_${videoId}_audio_320`, resolution: '320kbps Studio MP3 Audio', height: 0, vcodec: 'none', acodec: 'mp3', ext: 'mp3', isAudioOnly: true, filesizeFormatted: '28.8 MB' },
+        { format_id: `yt_${videoId}_audio_flac`, resolution: 'Lossless FLAC Master', height: 0, vcodec: 'none', acodec: 'flac', ext: 'flac', isAudioOnly: true, filesizeFormatted: '64.2 MB' }
       ]
     };
   }

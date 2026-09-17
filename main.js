@@ -12,7 +12,7 @@
  * - Native file manager reveal (shell.showItemInFolder) and directory picker
  */
 
-import { app, BrowserWindow, ipcMain, shell, dialog, clipboard, session } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, dialog, clipboard, session, Menu, MenuItem } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { spawn, exec } from 'child_process';
@@ -1287,11 +1287,197 @@ ipcMain.handle('shields:toggle', (event, enabled) => {
 });
 
 // -------------------------------------------------------------
+// Context Menu Controller (Link, Media, Selection, Page Contexts)
+// -------------------------------------------------------------
+function createCustomContextMenu(contents, params, win) {
+  const menu = new Menu();
+  const hasLink = Boolean(params.linkURL && params.linkURL.trim());
+  const hasSelection = Boolean(params.selectionText && params.selectionText.trim());
+  const isEditable = Boolean(params.isEditable);
+  const isImage = params.mediaType === 'image' || Boolean(params.srcURL && !params.linkURL && /\.(jpg|jpeg|png|webp|gif|svg)/i.test(params.srcURL));
+  const isVideo = params.mediaType === 'video';
+  const targetWin = win || mainWindow;
+
+  // 1. Link Context Menu (YouTube Thumbnails, Video Titles, Standard Links)
+  if (hasLink) {
+    const rawUrl = params.linkURL.trim();
+    const isMedia = /youtube\.com|youtu\.be|instagram\.com/i.test(rawUrl);
+
+    menu.append(new MenuItem({
+      label: 'Open Link in New Tab',
+      click: () => {
+        if (targetWin && !targetWin.isDestroyed()) {
+          targetWin.webContents.send('browser:open-new-tab', rawUrl);
+        }
+      }
+    }));
+
+    menu.append(new MenuItem({
+      label: 'Copy Link Address',
+      click: () => {
+        clipboard.writeText(rawUrl);
+      }
+    }));
+
+    if (isMedia) {
+      menu.append(new MenuItem({
+        label: '⚡ Open in Media Studio',
+        click: () => {
+          if (targetWin && !targetWin.isDestroyed()) {
+            targetWin.webContents.send('browser:open-media-studio', rawUrl);
+          }
+        }
+      }));
+    }
+
+    menu.append(new MenuItem({ type: 'separator' }));
+  }
+
+  // 2. Media Context Menu (Images)
+  if (isImage) {
+    const imgUrl = params.srcURL;
+    menu.append(new MenuItem({
+      label: 'Open Image in New Tab',
+      click: () => {
+        if (targetWin && !targetWin.isDestroyed()) {
+          targetWin.webContents.send('browser:open-new-tab', imgUrl);
+        }
+      }
+    }));
+
+    menu.append(new MenuItem({
+      label: 'Copy Image Address',
+      click: () => {
+        clipboard.writeText(imgUrl);
+      }
+    }));
+
+    menu.append(new MenuItem({ type: 'separator' }));
+  }
+
+  // 3. Media Context Menu (Video Elements outside custom players)
+  if (isVideo && !hasLink) {
+    const videoUrl = params.srcURL || params.pageURL;
+    if (videoUrl) {
+      menu.append(new MenuItem({
+        label: 'Copy Media URL',
+        click: () => {
+          clipboard.writeText(videoUrl);
+        }
+      }));
+      menu.append(new MenuItem({
+        label: '⚡ Send to Media Studio',
+        click: () => {
+          if (targetWin && !targetWin.isDestroyed()) {
+            targetWin.webContents.send('browser:open-media-studio', videoUrl);
+          }
+        }
+      }));
+      menu.append(new MenuItem({ type: 'separator' }));
+    }
+  }
+
+  // 4. Text Selection
+  if (hasSelection) {
+    const selectedText = params.selectionText.trim();
+    menu.append(new MenuItem({
+      label: 'Copy',
+      role: 'copy'
+    }));
+
+    const previewQuery = selectedText.length > 30 ? selectedText.substring(0, 30) + '...' : selectedText;
+    menu.append(new MenuItem({
+      label: `Search Google for "${previewQuery}"`,
+      click: () => {
+        const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(selectedText)}`;
+        if (targetWin && !targetWin.isDestroyed()) {
+          targetWin.webContents.send('browser:open-new-tab', searchUrl);
+        }
+      }
+    }));
+
+    menu.append(new MenuItem({ type: 'separator' }));
+  }
+
+  // 5. Editable Input Controls
+  if (isEditable) {
+    menu.append(new MenuItem({ label: 'Undo', role: 'undo' }));
+    menu.append(new MenuItem({ label: 'Redo', role: 'redo' }));
+    menu.append(new MenuItem({ type: 'separator' }));
+    menu.append(new MenuItem({ label: 'Cut', role: 'cut' }));
+    menu.append(new MenuItem({ label: 'Copy', role: 'copy' }));
+    menu.append(new MenuItem({ label: 'Paste', role: 'paste' }));
+    menu.append(new MenuItem({ label: 'Select All', role: 'selectAll' }));
+    menu.append(new MenuItem({ type: 'separator' }));
+  }
+
+  // 6. Navigation and Developer Tools (Page level)
+  // Only show Back / Forward / Reload when user clicked canvas or non-link
+  if (!hasLink && !hasSelection && !isEditable) {
+    menu.append(new MenuItem({
+      label: 'Back',
+      enabled: Boolean(contents && contents.canGoBack && contents.canGoBack()),
+      click: () => {
+        if (contents && contents.canGoBack && contents.canGoBack()) contents.goBack();
+      }
+    }));
+
+    menu.append(new MenuItem({
+      label: 'Forward',
+      enabled: Boolean(contents && contents.canGoForward && contents.canGoForward()),
+      click: () => {
+        if (contents && contents.canGoForward && contents.canGoForward()) contents.goForward();
+      }
+    }));
+
+    menu.append(new MenuItem({
+      label: 'Reload',
+      click: () => {
+        if (contents && contents.reload) contents.reload();
+      }
+    }));
+
+    menu.append(new MenuItem({ type: 'separator' }));
+
+    menu.append(new MenuItem({
+      label: 'Inspect Element',
+      click: () => {
+        if (contents && contents.inspectElement) {
+          contents.inspectElement(params.x, params.y);
+        }
+      }
+    }));
+  }
+
+  if (menu.items.length > 0) {
+    menu.popup({
+      window: targetWin,
+      x: params.x,
+      y: params.y
+    });
+  }
+}
+
+ipcMain.handle('context-menu:show', (event, params) => {
+  const senderContents = event.sender;
+  createCustomContextMenu(senderContents, params, mainWindow);
+  return { success: true };
+});
+
+// -------------------------------------------------------------
 // App Lifecycle
 // -------------------------------------------------------------
 app.whenReady().then(() => {
   setupShieldsAdBlocking();
   createMainWindow();
+
+  app.on('web-contents-created', (event, contents) => {
+    // Enable context menu for all web contents including guest webviews
+    contents.on('context-menu', (e, params) => {
+      e.preventDefault();
+      createCustomContextMenu(contents, params, mainWindow);
+    });
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

@@ -125,6 +125,7 @@ class YASBrowser {
     this.setupDashboard();
     this.setupKeyboardShortcuts();
     this.setupSettingsSystem();
+    this.setupIPCBridge();
     this.startClock();
 
     // Create the default first tab (New Tab Dashboard)
@@ -511,6 +512,34 @@ class YASBrowser {
     }
   }
 
+  setupIPCBridge() {
+    if (!window.electronAPI) return;
+
+    if (window.electronAPI.onOpenNewTab) {
+      window.electronAPI.onOpenNewTab((url) => {
+        if (url) {
+          this.createTab({
+            title: this.parseUrlDomain(url) || 'New Tab',
+            url: url,
+            favicon: '🌐',
+            isInternal: false
+          });
+        }
+      });
+    }
+
+    if (window.electronAPI.onOpenMediaStudio) {
+      window.electronAPI.onOpenMediaStudio((url) => {
+        if (window.mediaDownloader && url) {
+          window.mediaDownloader.openPanel();
+          window.mediaDownloader.dom.urlInput.value = url;
+          window.mediaDownloader.updateInputClearButton();
+          window.mediaDownloader.startAnalysis();
+        }
+      });
+    }
+  }
+
   setDownloadFolder(path) {
     this.downloadPath = path;
     localStorage.setItem('yas_download_path', path);
@@ -745,6 +774,23 @@ class YASBrowser {
         this.injectYouTubeAdBlocker(webview, e.url);
       });
 
+      // Delegate Context Menu to Electron Main Menu
+      webview.addEventListener('context-menu', (e) => {
+        if (window.electronAPI && window.electronAPI.showContextMenu && e.params) {
+          window.electronAPI.showContextMenu({
+            x: e.params.x || 0,
+            y: e.params.y || 0,
+            linkURL: e.params.linkURL || '',
+            linkText: e.params.linkText || '',
+            srcURL: e.params.srcURL || '',
+            mediaType: e.params.mediaType || 'none',
+            selectionText: e.params.selectionText || '',
+            isEditable: Boolean(e.params.isEditable),
+            tabId: tab.id
+          });
+        }
+      });
+
       container.appendChild(webview);
       tab.viewElement = webview;
     } else {
@@ -799,7 +845,6 @@ class YASBrowser {
         style.id = 'yas-ad-suppress-style';
         style.textContent = \`
           .video-ads,
-          .ytp-ad-module,
           .ytp-ad-overlay-container,
           .ytp-ad-player-overlay,
           .ytp-ad-player-overlay-layout,
@@ -824,29 +869,20 @@ class YASBrowser {
         \`;
         (document.head || document.documentElement).appendChild(style);
 
-        // 2. High-Frequency Video Ad Auto-Skipper & Fast-Forward Engine
+        // 2. Safe Video Ad Skip Button Auto-Clicker
         setInterval(function() {
-          // Trigger skip buttons instantly
-          const skipButtons = document.querySelectorAll(
-            '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, .ytp-ad-skip-button-slot button, .ytp-ad-overlay-close-button'
-          );
-          skipButtons.forEach(btn => {
-            if (btn && typeof btn.click === 'function') {
-              btn.click();
-            }
-          });
-
-          // Detect unskippable video ads and instantly scrub to end
-          const video = document.querySelector('video');
-          const isAdActive = document.querySelector('.ad-showing, .ytp-ad-player-overlay, .ytp-ad-module');
-          if (video && isAdActive) {
-            if (isFinite(video.duration) && video.duration > 0) {
-              video.currentTime = video.duration + 1;
-            }
-            video.playbackRate = 16.0;
-            video.muted = true;
+          const isAdActive = document.querySelector('.ad-showing, .ad-interrupting');
+          if (isAdActive) {
+            const skipButtons = document.querySelectorAll(
+              '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, .ytp-ad-skip-button-slot button, .ytp-ad-overlay-close-button'
+            );
+            skipButtons.forEach(btn => {
+              if (btn && typeof btn.click === 'function') {
+                btn.click();
+              }
+            });
           }
-        }, 120);
+        }, 300);
       })();
     `;
 
