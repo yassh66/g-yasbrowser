@@ -616,8 +616,6 @@ class YASBrowser {
       this.dom.winMinimize.addEventListener('click', () => {
         if (window.electronAPI && window.electronAPI.minimize) {
           window.electronAPI.minimize();
-        } else {
-          this.showToast('Window minimize action');
         }
       });
     }
@@ -627,8 +625,6 @@ class YASBrowser {
         if (window.electronAPI && window.electronAPI.maximize) {
           const isMax = await window.electronAPI.maximize();
           this.updateMaximizeIcon(isMax);
-        } else {
-          this.showToast('Window maximize toggled');
         }
       });
     }
@@ -637,8 +633,20 @@ class YASBrowser {
       this.dom.winClose.addEventListener('click', () => {
         if (window.electronAPI && window.electronAPI.close) {
           window.electronAPI.close();
-        } else {
-          this.showToast('Window close request');
+        }
+      });
+    }
+
+    // Double-click on top title bar / empty tab strip to toggle maximize / restore
+    if (this.dom.titlebar) {
+      this.dom.titlebar.addEventListener('dblclick', async (e) => {
+        // Only trigger if double clicking on draggable background / empty areas, not on interactive controls
+        if (e.target.closest('.tab-item, .tab-new-btn, .brand-badge, .theme-toggle-btn, .settings-nav-btn, .window-controls, .win-btn, button, input, a')) {
+          return;
+        }
+        if (window.electronAPI && window.electronAPI.maximize) {
+          const isMax = await window.electronAPI.maximize();
+          this.updateMaximizeIcon(isMax);
         }
       });
     }

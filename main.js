@@ -12,12 +12,17 @@
  * - Native file manager reveal (shell.showItemInFolder) and directory picker
  */
 
-import { app, BrowserWindow, ipcMain, shell, dialog, clipboard, session, Menu, MenuItem } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, dialog, clipboard, session, Menu, MenuItem, nativeImage } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { spawn, exec } from 'child_process';
 import fs from 'fs';
 import os from 'os';
+
+// Ensure Windows taskbar, notifications, and Alt+Tab correctly group under YAS Browser identity
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.yas.browser');
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -112,21 +117,32 @@ let cachedFfmpegPath = null;
  * Creates the primary browser window
  */
 function createMainWindow() {
+  const isWin = process.platform === 'win32';
+  const primaryIconName = isWin ? 'yas-browser.ico' : 'icon.png';
   const iconCandidates = [
+    path.join(__dirname, 'assets', primaryIconName),
+    path.join(__dirname, 'build', primaryIconName),
+    path.join(__dirname, 'public', primaryIconName),
+    path.join(__dirname, primaryIconName),
     path.join(__dirname, 'assets', 'yas-browser.ico'),
-    path.join(__dirname, 'build', 'yas-browser.ico'),
-    path.join(__dirname, 'public', 'yas-browser.ico'),
-    path.join(__dirname, 'yas-browser.ico'),
     path.join(__dirname, 'assets', 'icon.png')
   ];
-  const appIcon = iconCandidates.find((p) => fs.existsSync(p));
+  const appIconPath = iconCandidates.find((p) => fs.existsSync(p));
+  let appIcon = null;
+  if (appIconPath) {
+    try {
+      appIcon = nativeImage.createFromPath(appIconPath);
+    } catch (_) {
+      appIcon = appIconPath;
+    }
+  }
 
   mainWindow = new BrowserWindow({
     width: 1320,
     height: 880,
     minWidth: 980,
     minHeight: 640,
-    icon: appIcon,
+    icon: appIcon || appIconPath,
     frame: false, // Frameless for modern custom title bar (Brave/Arc style)
     titleBarStyle: 'hidden',
     backgroundColor: '#090a0f',
@@ -139,6 +155,12 @@ function createMainWindow() {
       spellcheck: true
     }
   });
+
+  if (appIcon && typeof mainWindow.setIcon === 'function') {
+    try {
+      mainWindow.setIcon(appIcon);
+    } catch (_) {}
+  }
 
   const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
   if (isDev && process.env.ELECTRON_START_URL) {
