@@ -755,7 +755,7 @@ class MediaDownloader {
     const job = this.activeDownloads.get(downloadId);
     if (!job) return;
 
-    if (data.status === 'completed' || (typeof data.percent === 'number' && data.percent >= 100)) {
+    if (data.status === 'completed') {
       this.onDownloadCompleted(downloadId, data);
       return;
     }
@@ -774,7 +774,7 @@ class MediaDownloader {
 
     if (data.status === 'merging') {
       job.status = 'merging';
-    } else if (job.status !== 'merging') {
+    } else if (job.status !== 'merging' && job.status !== 'completed') {
       job.status = 'downloading';
     }
 
@@ -795,7 +795,7 @@ class MediaDownloader {
       if (job.status === 'merging') {
         pill.className = 'queue-item-status-pill merging';
         pill.textContent = 'Muxing FFmpeg';
-      } else {
+      } else if (job.status !== 'completed') {
         pill.className = 'queue-item-status-pill downloading';
         pill.textContent = `${Math.round(job.progress)}%`;
       }
@@ -807,7 +807,7 @@ class MediaDownloader {
 
   onDownloadCompleted(downloadId, data) {
     const job = this.activeDownloads.get(downloadId);
-    if (!job) return;
+    if (!job || job.status === 'completed') return;
 
     job.status = 'completed';
     job.progress = 100;
@@ -852,7 +852,7 @@ class MediaDownloader {
       }
     }
 
-    this.showToast(`Download finished: ${job.title}`);
+    // No spam popup notifications on download completion as requested
     this.updateDownloadCounter();
   }
 
@@ -1035,7 +1035,8 @@ class MediaDownloader {
   // 6. IPC Event Subscriptions
   // =========================================================================
   setupIPCListeners() {
-    if (!window.electronAPI) return;
+    if (!window.electronAPI || this.__ipcListenersInitialized) return;
+    this.__ipcListenersInitialized = true;
 
     if (window.electronAPI.onDownloadProgress) {
       window.electronAPI.onDownloadProgress((data) => {
