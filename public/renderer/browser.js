@@ -516,14 +516,20 @@ class YASBrowser {
     if (!window.electronAPI) return;
 
     if (window.electronAPI.onOpenNewTab) {
-      window.electronAPI.onOpenNewTab((url) => {
-        if (url) {
+      window.electronAPI.onOpenNewTab((data) => {
+        const targetUrl = typeof data === 'string' ? data : (data?.url || '');
+        const shouldActivate = typeof data === 'object' && data !== null && 'activate' in data ? Boolean(data.activate) : false;
+        if (targetUrl) {
           this.createTab({
-            title: this.parseUrlDomain(url) || 'New Tab',
-            url: url,
+            title: this.parseUrlDomain(targetUrl) || 'New Tab',
+            url: targetUrl,
             favicon: '🌐',
-            isInternal: false
+            isInternal: false,
+            activate: shouldActivate
           });
+          if (!shouldActivate) {
+            this.showToast('Opened link in background tab');
+          }
         }
       });
     }
@@ -654,7 +660,7 @@ class YASBrowser {
   // =========================================================================
   // 3. Multi-Tab Management System
   // =========================================================================
-  createTab({ title = 'New Tab', url = 'yas://newtab', favicon = '✨', isInternal = true }) {
+  createTab({ title = 'New Tab', url = 'yas://newtab', favicon = '✨', isInternal = true, activate = true }) {
     this.tabCounter += 1;
     const tabId = `tab_${Date.now()}_${this.tabCounter}`;
 
@@ -736,7 +742,10 @@ class YASBrowser {
     tab.viewPane = viewPane;
 
     this.tabs.push(tab);
-    this.activateTab(tabId);
+
+    if (activate) {
+      this.activateTab(tabId);
+    }
 
     return tab;
   }
@@ -750,13 +759,23 @@ class YASBrowser {
       webview.setAttribute('allowpopups', 'true');
       webview.setAttribute('webpreferences', 'nativeWindowOpen=yes');
 
+      const reapplyPageEnhancements = () => {
+        const currentUrl = webview.getURL ? webview.getURL() : tab.url;
+        this.injectContextMenuHelper(webview);
+        this.injectYouTubeAdBlocker(webview, currentUrl);
+      };
+
       webview.addEventListener('did-start-loading', () => {
         this.onTabStartLoading(tab.id);
       });
 
+      webview.addEventListener('dom-ready', () => {
+        reapplyPageEnhancements();
+      });
+
       webview.addEventListener('did-stop-loading', () => {
         this.onTabStopLoading(tab.id);
-        this.injectYouTubeAdBlocker(webview, tab.url);
+        reapplyPageEnhancements();
       });
 
       webview.addEventListener('page-title-updated', (e) => {
@@ -771,21 +790,58 @@ class YASBrowser {
 
       webview.addEventListener('did-navigate', (e) => {
         this.onTabNavigated(tab.id, e.url);
-        this.injectYouTubeAdBlocker(webview, e.url);
+        reapplyPageEnhancements();
       });
 
-      // Delegate Context Menu to Electron Main Menu
-      webview.addEventListener('context-menu', (e) => {
+      webview.addEventListener('did-navigate-in-page', (e) => {
+        this.onTabNavigated(tab.id, e.url);
+        reapplyPageEnhancements();
+      });
+
+      // Delegate Context Menu to Electron Main Menu with robust DOM target resolution
+      webview.addEventListener('context-menu', async (e) => {
+        let linkURL = e.params ? (e.params.linkURL || '') : '';
+        let linkText = e.params ? (e.params.linkText || '') : '';
+        let srcURL = e.params ? (e.params.srcURL || '') : '';
+
+        // If linkURL is missing or empty, fetch the resolved link from the captured DOM right-click
+        if (!linkURL) {
+          try {
+            const domInfo = await webview.executeJavaScript(`
+              (function() {
+                return {
+                  link: window.__yasLastRightClickedLink || document.documentElement.getAttribute('data-yas-last-link') || '',
+                  title: window.__yasLastRightClickedTitle || document.documentElement.getAttribute('data-yas-last-title') || '',
+                  src: window.__yasLastRightClickedSrc || document.documentElement.getAttribute('data-yas-last-src') || ''
+                };
+              })()
+            `);
+            if (domInfo && domInfo.link) linkURL = domInfo.link;
+            if (domInfo && domInfo.title && !linkText) linkText = domInfo.title;
+            if (domInfo && domInfo.src && !srcURL) srcURL = domInfo.src;
+          } catch (_) {}
+        }
+
+        // Secondary fallback: Extract video ID from YouTube thumbnail URL in srcURL
+        if (!linkURL && srcURL) {
+          const ytThumbMatch = srcURL.match(/(?:vi|vi_webp)\/([a-zA-Z0-9_-]{11})/i) ||
+                               srcURL.match(/img\.youtube\.com\/vi\/([a-zA-Z0-9_-]{11})/i);
+          if (ytThumbMatch) {
+            linkURL = `https://www.youtube.com/watch?v=${ytThumbMatch[1]}`;
+          }
+        }
+
         if (window.electronAPI && window.electronAPI.showContextMenu && e.params) {
           window.electronAPI.showContextMenu({
             x: e.params.x || 0,
             y: e.params.y || 0,
-            linkURL: e.params.linkURL || '',
-            linkText: e.params.linkText || '',
-            srcURL: e.params.srcURL || '',
+            linkURL: linkURL,
+            linkText: linkText,
+            srcURL: srcURL,
             mediaType: e.params.mediaType || 'none',
             selectionText: e.params.selectionText || '',
             isEditable: Boolean(e.params.isEditable),
+            pageURL: webview.getURL ? webview.getURL() : tab.url,
             tabId: tab.id
           });
         }
@@ -827,26 +883,185 @@ class YASBrowser {
   }
 
   /**
+   * Injects high-accuracy Context Menu Capture Listener into webview
+   * Resolves YouTube rich item cards, thumbnails, anchors, overlays, and Instagram posts
+   */
+  injectContextMenuHelper(webview) {
+    if (!webview) return;
+    const contextScript = `
+      (function() {
+        if (window.__yasContextMenuHelperInstalled) return;
+        window.__yasContextMenuHelperInstalled = true;
+
+        document.addEventListener('contextmenu', function(e) {
+          let target = e.target;
+          let linkUrl = '';
+          let titleText = '';
+          let imgSrc = '';
+
+          // 1. Direct anchor or closest anchor
+          const anchor = target.closest ? target.closest('a') : null;
+          if (anchor && anchor.href && (anchor.href.includes('/watch') || anchor.href.includes('/shorts') || anchor.href.includes('youtu.be') || anchor.href.includes('/p/') || anchor.href.includes('/reel/'))) {
+            linkUrl = anchor.href;
+            titleText = anchor.textContent || anchor.getAttribute('title') || anchor.getAttribute('aria-label') || '';
+          }
+
+          // 2. YouTube Card Containers (Homepage, Subscriptions, Search, Sidebar)
+          if (!linkUrl && target.closest) {
+            const card = target.closest(
+              'ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, ytd-reel-item-renderer, ytd-playlist-renderer, ytd-reel-shelf-renderer, ytd-rich-grid-media, ytd-thumbnail, ytd-video-preview, ytd-item-section-renderer, [id="dismissible"]'
+            );
+            if (card) {
+              const videoAnchor = card.querySelector(
+                'a#thumbnail, a#video-title-link, a#video-title, a.ytd-thumbnail, a[href*="/watch?"], a[href*="/shorts/"], a.yt-simple-endpoint[href*="watch"], a.yt-simple-endpoint[href*="shorts"], a[href^="/watch"], a[href^="/shorts"]'
+              );
+              if (videoAnchor && videoAnchor.href) {
+                linkUrl = videoAnchor.href;
+                titleText = videoAnchor.textContent || videoAnchor.getAttribute('title') || videoAnchor.getAttribute('aria-label') || '';
+              }
+            }
+          }
+
+          // 3. YouTube Thumbnail Image parsing
+          const img = target.tagName === 'IMG' ? target : (target.querySelector ? target.querySelector('img') : null);
+          if (img && img.src) {
+            imgSrc = img.src;
+            if (!linkUrl) {
+              const ytMatch = img.src.match(/(?:vi|vi_webp)\/([a-zA-Z0-9_-]{11})/i) ||
+                              img.src.match(/img\.youtube\.com\/vi\/([a-zA-Z0-9_-]{11})/i);
+              if (ytMatch) {
+                linkUrl = 'https://www.youtube.com/watch?v=' + ytMatch[1];
+              }
+            }
+          }
+
+          // 4. Instagram posts/reels
+          if (!linkUrl && target.closest) {
+            const igCard = target.closest('article, div[role="presentation"], a[href*="/p/"], a[href*="/reel/"]');
+            if (igCard) {
+              const igAnchor = igCard.tagName === 'A' ? igCard : igCard.querySelector('a[href*="/p/"], a[href*="/reel/"]');
+              if (igAnchor && igAnchor.href) {
+                linkUrl = igAnchor.href;
+              }
+            }
+          }
+
+          // 5. General anchor fallback
+          if (!linkUrl && anchor && anchor.href && !anchor.href.startsWith('javascript:')) {
+            linkUrl = anchor.href;
+            titleText = anchor.textContent || '';
+          }
+
+          // Normalize relative URLs to absolute
+          if (linkUrl && !linkUrl.startsWith('http://') && !linkUrl.startsWith('https://')) {
+            try {
+              linkUrl = new URL(linkUrl, window.location.href).href;
+            } catch (_) {}
+          }
+
+          window.__yasLastRightClickedLink = linkUrl || '';
+          window.__yasLastRightClickedTitle = (titleText || '').trim();
+          window.__yasLastRightClickedSrc = imgSrc || '';
+          if (document.documentElement) {
+            document.documentElement.setAttribute('data-yas-last-link', linkUrl || '');
+            document.documentElement.setAttribute('data-yas-last-title', (titleText || '').trim());
+            document.documentElement.setAttribute('data-yas-last-src', imgSrc || '');
+          }
+        }, true);
+      })();
+    `;
+
+    try {
+      if (typeof webview.executeJavaScript === 'function') {
+        webview.executeJavaScript(contextScript).catch(() => {});
+      }
+    } catch (_) {}
+  }
+
+  /**
    * High-Performance YouTube Video Ad & Telemetry Blocker Content Injector
+   * Multi-layer ad suppression: response sanitization, CSS masking, and skip clicker
+   * Never interferes with currentTime, duration, seeking, volume, or playback controls
    */
   injectYouTubeAdBlocker(webview, url) {
     if (!webview || !url || !this.shieldsStats.shieldsEnabled) return;
     const isYouTube = url.includes('youtube.com') || url.includes('youtu.be');
     if (!isYouTube) return;
 
-    // Execute ad suppression and MutationObserver skip-clicker script inside webview
+    // Execute ad suppression, player sanitization, and fallback skip-clicker script inside webview
     const adBlockerScript = `
       (function() {
-        if (window.__yasAdBlockerInitialized) return;
-        window.__yasAdBlockerInitialized = true;
+        // 1. YouTube Player Ad Response Sanitizer (Strips adPlacements, playerAds, adSlots)
+        function sanitizePlayerObject(obj) {
+          if (!obj || typeof obj !== 'object') return obj;
+          try {
+            if ('adPlacements' in obj) delete obj.adPlacements;
+            if ('playerAds' in obj) delete obj.playerAds;
+            if ('adSlots' in obj) delete obj.adSlots;
+            if ('adBreakHeartbeatParams' in obj) delete obj.adBreakHeartbeatParams;
+            if (obj.auxiliaryUi && obj.auxiliaryUi.messageRenderers && obj.auxiliaryUi.messageRenderers.upsellDialogRenderer) {
+              delete obj.auxiliaryUi.messageRenderers.upsellDialogRenderer;
+            }
+          } catch (_) {}
+          return obj;
+        }
 
-        // 1. Inject High-Priority Ad Element CSS Masking
+        // Sanitize initial player response if already present
+        if (window.ytInitialPlayerResponse) {
+          sanitizePlayerObject(window.ytInitialPlayerResponse);
+        }
+
+        // Hook window.ytInitialPlayerResponse setter
+        let _ytInitialPlayerResponse = window.ytInitialPlayerResponse;
+        try {
+          Object.defineProperty(window, 'ytInitialPlayerResponse', {
+            get: function() { return _ytInitialPlayerResponse; },
+            set: function(val) { _ytInitialPlayerResponse = sanitizePlayerObject(val); },
+            configurable: true
+          });
+        } catch (_) {}
+
+        // Hook fetch to sanitize /youtubei/v1/player responses before the player engine receives them
+        if (!window.__yasFetchHooked && window.fetch) {
+          window.__yasFetchHooked = true;
+          const originalFetch = window.fetch;
+          window.fetch = async function(...args) {
+            const response = await originalFetch.apply(this, args);
+            try {
+              const reqUrl = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url ? args[0].url : '');
+              if (reqUrl.includes('/youtubei/v1/player') || reqUrl.includes('/youtubei/v1/next')) {
+                const clone = response.clone();
+                const json = await clone.json();
+                sanitizePlayerObject(json);
+                return new Response(JSON.stringify(json), {
+                  status: response.status,
+                  statusText: response.statusText,
+                  headers: response.headers
+                });
+              }
+            } catch (_) {}
+            return response;
+          };
+        }
+
+        // Hook XMLHttpRequest for older/fallback player endpoints
+        if (!window.__yasXHRHooked && window.XMLHttpRequest) {
+          window.__yasXHRHooked = true;
+          const origOpen = XMLHttpRequest.prototype.open;
+          XMLHttpRequest.prototype.open = function(method, url) {
+            this.__yasUrl = url;
+            return origOpen.apply(this, arguments);
+          };
+        }
+
+        // 2. High-Priority Ad Element CSS Masking
         const styleId = 'yas-ad-suppress-style';
         if (!document.getElementById(styleId)) {
           const style = document.createElement('style');
           style.id = styleId;
           style.textContent = \`
             .video-ads,
+            .ytp-ad-module,
             .ytp-ad-overlay-container,
             .ytp-ad-player-overlay,
             .ytp-ad-player-overlay-layout,
@@ -854,6 +1069,7 @@ class YASBrowser {
             ytd-banner-promo-renderer,
             #masthead-ad,
             ytd-rich-item-renderer:has(ytd-ad-slot-renderer),
+            ytd-rich-item-renderer:has(#ad-badge),
             ytd-display-ad-renderer,
             #player-ads,
             .sparkles-light-cta,
@@ -873,7 +1089,7 @@ class YASBrowser {
           (document.head || document.documentElement).appendChild(style);
         }
 
-        // 2. Robust MutationObserver-based Skip Ad Clicker
+        // 3. Fallback MutationObserver-based Skip Ad Clicker
         const skipSelectors = [
           '.ytp-ad-skip-button',
           '.ytp-ad-skip-button-modern',
@@ -905,28 +1121,33 @@ class YASBrowser {
           }
         }
 
-        // Initialize MutationObserver on player/DOM
-        const observer = new MutationObserver(function(mutations) {
-          const isAdActive = document.querySelector('.ad-showing, .ad-interrupting, .ytp-ad-player-overlay');
-          if (isAdActive) {
-            tryClickSkipAd();
-          }
-        });
+        // Initialize MutationObserver on player/DOM if not already running
+        if (!window.__yasAdObserver) {
+          const observer = new MutationObserver(function(mutations) {
+            const isAdActive = document.querySelector('.ad-showing, .ad-interrupting, .ytp-ad-player-overlay');
+            if (isAdActive) {
+              tryClickSkipAd();
+            }
+          });
 
-        observer.observe(document.body || document.documentElement, {
-          childList: true,
-          subtree: true,
-          attributes: true,
-          attributeFilter: ['class', 'style', 'id']
-        });
+          observer.observe(document.body || document.documentElement, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['class', 'style', 'id']
+          });
+          window.__yasAdObserver = observer;
+        }
 
         // Periodic heartbeat check in case mutations settle while ad is playing
-        setInterval(function() {
-          const isAdActive = document.querySelector('.ad-showing, .ad-interrupting, .ytp-ad-player-overlay');
-          if (isAdActive) {
-            tryClickSkipAd();
-          }
-        }, 1000);
+        if (!window.__yasAdInterval) {
+          window.__yasAdInterval = setInterval(function() {
+            const isAdActive = document.querySelector('.ad-showing, .ad-interrupting, .ytp-ad-player-overlay');
+            if (isAdActive) {
+              tryClickSkipAd();
+            }
+          }, 1000);
+        }
       })();
     `;
 

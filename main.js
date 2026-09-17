@@ -40,6 +40,8 @@ const AD_TRACKER_PATTERNS = [
   '*://*.doubleclick.net/*',
   '*://*.googlesyndication.com/*',
   '*://*.googleadservices.com/*',
+  '*://googleads.g.doubleclick.net/*',
+  '*://pagead2.googlesyndication.com/*',
   '*://*.youtube.com/api/stats/ads*',
   '*://*.youtube.com/pagead/*',
   '*://*.youtube.com/ptracking*',
@@ -47,6 +49,10 @@ const AD_TRACKER_PATTERNS = [
   '*://*.youtube.com/api/stats/qoe*',
   '*://*.youtube.com/get_midroll_info*',
   '*://*.youtube.com/api/stats/watchtime*',
+  '*://*.youtube.com/api/stats/playback*ad*',
+  '*://*.youtube.com/pcs/activeview*',
+  '*://*.youtube.com/error_204?*ad*',
+  '*://*.youtube.com/ad_companion*',
   '*://adservice.google.com/*',
   '*://static.doubleclick.net/*',
   '*://securepubads.g.doubleclick.net/*',
@@ -56,7 +62,9 @@ const AD_TRACKER_PATTERNS = [
   '*://*.amazon-adsystem.com/*',
   '*://*.criteo.com/*',
   '*://*.taboola.com/*',
-  '*://*.outbrain.com/*'
+  '*://*.outbrain.com/*',
+  '*://*.scorecardresearch.com/*',
+  '*://*.zedo.com/*'
 ];
 
 /**
@@ -1351,16 +1359,16 @@ function createCustomContextMenu(contents, params, win) {
       label: 'Open Link in New Tab',
       click: () => {
         if (targetWin && !targetWin.isDestroyed()) {
-          targetWin.webContents.send('browser:open-new-tab', rawLinkUrl);
+          targetWin.webContents.send('browser:open-new-tab', { url: rawLinkUrl, activate: false });
         }
       }
     }));
 
     menu.append(new MenuItem({
-      label: 'Open Link in New Window',
+      label: 'Open Link in Foreground Tab',
       click: () => {
         if (targetWin && !targetWin.isDestroyed()) {
-          targetWin.webContents.send('browser:open-new-tab', rawLinkUrl);
+          targetWin.webContents.send('browser:open-new-tab', { url: rawLinkUrl, activate: true });
         }
       }
     }));
@@ -1524,7 +1532,7 @@ app.whenReady().then(() => {
   createMainWindow();
 
   app.on('web-contents-created', (event, contents) => {
-    // Enable context menu for all web contents including guest webviews
+    // Enable context menu for top-level and handle guest webviews
     contents.on('context-menu', (e, params) => {
       // Check if right-click was on YouTube's custom in-player element
       const currentUrl = (params.pageURL || (contents.getURL ? contents.getURL() : '')).toLowerCase();
@@ -1532,6 +1540,12 @@ app.whenReady().then(() => {
       
       // If user right-clicks the video player itself, preserve YouTube's native HTML player menu
       if (isYouTubeVideo && !params.linkURL) {
+        return;
+      }
+
+      // If this is a webview guest, the <webview> listener in renderer enriches the parameters with DOM target data
+      if (contents.getType() === 'webview') {
+        e.preventDefault();
         return;
       }
 

@@ -755,10 +755,34 @@ class MediaDownloader {
     const job = this.activeDownloads.get(downloadId);
     if (!job) return;
 
-    job.progress = data.percent || 0;
-    job.speed = data.speed || '2.4 MB/s';
-    job.eta = data.eta || '15s';
-    job.downloaded = data.downloaded || '12 MB';
+    if (data.status === 'completed' || (typeof data.percent === 'number' && data.percent >= 100)) {
+      this.onDownloadCompleted(downloadId, data);
+      return;
+    }
+
+    if (data.status === 'error') {
+      job.status = 'error';
+      const pill = document.getElementById(`pill_${downloadId}`);
+      if (pill) {
+        pill.className = 'queue-item-status-pill error';
+        pill.textContent = 'Error';
+      }
+      this.showToast(`Download error: ${data.error || 'Network error'}`);
+      this.updateDownloadCounter();
+      return;
+    }
+
+    if (data.status === 'merging') {
+      job.status = 'merging';
+    } else if (job.status !== 'merging') {
+      job.status = 'downloading';
+    }
+
+    job.progress = typeof data.percent === 'number' ? data.percent : (job.progress || 0);
+    job.speed = data.speed || job.speed || '2.4 MB/s';
+    job.eta = data.eta || job.eta || '15s';
+    job.downloaded = data.downloaded || job.downloaded || '12 MB';
+    if (data.filePath) job.outputPath = data.filePath;
 
     const pbar = document.getElementById(`pbar_${downloadId}`);
     const pill = document.getElementById(`pill_${downloadId}`);
@@ -766,7 +790,7 @@ class MediaDownloader {
     const eta = document.getElementById(`eta_${downloadId}`);
     const size = document.getElementById(`size_${downloadId}`);
 
-    if (pbar) pbar.style.width = `${job.progress}%`;
+    if (pbar) pbar.style.width = `${Math.min(100, Math.max(0, job.progress))}%`;
     if (pill) {
       if (job.status === 'merging') {
         pill.className = 'queue-item-status-pill merging';
@@ -787,7 +811,11 @@ class MediaDownloader {
 
     job.status = 'completed';
     job.progress = 100;
-    job.outputPath = data?.filePath || `${this.destinationFolder}/${job.title}.mp4`;
+    if (data?.filePath) {
+      job.outputPath = data.filePath;
+    } else if (!job.outputPath) {
+      job.outputPath = `${this.destinationFolder}/${job.title}.mp4`;
+    }
 
     const pbar = document.getElementById(`pbar_${downloadId}`);
     const pill = document.getElementById(`pill_${downloadId}`);
@@ -800,20 +828,25 @@ class MediaDownloader {
 
     if (pill) {
       pill.className = 'queue-item-status-pill completed';
-      pill.textContent = '✓ Completed';
+      pill.textContent = '✓ 100% Completed';
     }
 
     if (actions) {
       actions.innerHTML = `
-        <button class="btn-queue-action" id="btnOpenFolder_${downloadId}">📁 Open Folder</button>
+        <button class="btn-queue-action" id="btnOpenFolder_${downloadId}" title="Open and highlight downloaded video in folder">
+          📁 Open Folder
+        </button>
       `;
       const btnFolder = actions.querySelector(`#btnOpenFolder_${downloadId}`);
       if (btnFolder) {
         btnFolder.addEventListener('click', () => {
-          if (window.electronAPI && window.electronAPI.openFolder) {
-            window.electronAPI.openFolder(this.destinationFolder);
+          const targetPath = job.outputPath || job.filePath || this.destinationFolder;
+          if (window.electronAPI && window.electronAPI.showInFolder && job.outputPath) {
+            window.electronAPI.showInFolder(job.outputPath);
+          } else if (window.electronAPI && window.electronAPI.openFolder) {
+            window.electronAPI.openFolder(targetPath);
           } else {
-            this.showToast(`Opening download folder: ${this.destinationFolder}`);
+            this.showToast(`Opening download folder: ${targetPath}`);
           }
         });
       }
@@ -850,14 +883,26 @@ class MediaDownloader {
 
   clearCompletedDownloads() {
     let cleared = 0;
+    const idsToRemove = [];
+
     this.activeDownloads.forEach((job, id) => {
       if (job.status === 'completed' || job.status === 'cancelled' || job.status === 'error') {
         const el = document.getElementById(`queue_item_${id}`);
         if (el) el.remove();
-        this.activeDownloads.delete(id);
+        idsToRemove.push(id);
         cleared += 1;
       }
     });
+
+    idsToRemove.forEach((id) => this.activeDownloads.delete(id));
+
+    // Also clean up any lingering completed/orphaned DOM items in the list
+    if (this.dom.queueList) {
+      const remainingItems = this.dom.queueList.querySelectorAll('.download-item-card');
+      if (remainingItems.length === 0 && this.dom.emptyQueuePlaceholder) {
+        this.dom.emptyQueuePlaceholder.style.display = 'flex';
+      }
+    }
 
     if (this.activeDownloads.size === 0 && this.dom.emptyQueuePlaceholder) {
       this.dom.emptyQueuePlaceholder.style.display = 'flex';
@@ -865,13 +910,15 @@ class MediaDownloader {
 
     this.updateDownloadCounter();
     if (cleared > 0) {
-      this.showToast(`Cleared ${cleared} completed transfers`);
+      this.showToast(`Cleared ${cleared} item${cleared > 1 ? 's' : ''} from download list`);
+    } else {
+      this.showToast('Download list is already clean');
     }
   }
 
   updateDownloadCounter() {
     const activeCount = Array.from(this.activeDownloads.values()).filter(
-      (j) => j.status === 'downloading' || job.status === 'merging'
+      (j) => j.status === 'downloading' || j.status === 'merging'
     ).length;
 
     if (this.dom.downloadCounter) {
