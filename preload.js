@@ -29,6 +29,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkDependencies: () => ipcRenderer.invoke('system:check-dependencies'),
   copyToClipboard: (text) => ipcRenderer.invoke('system:copy-to-clipboard', text),
   
+  // Shields & Ad-Blocking IPC
+  getShieldsStatus: () => ipcRenderer.invoke('shields:get-status'),
+  toggleShields: (enabled) => ipcRenderer.invoke('shields:toggle', enabled),
+  onShieldsTally: (callback) => {
+    ipcRenderer.on('shields:blocked-tally', (event, data) => callback(data));
+  },
+  
   // Real-time download progress listener
   onDownloadProgress: (callback) => {
     ipcRenderer.on('media:progress', (event, data) => callback(data));

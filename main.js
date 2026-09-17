@@ -12,7 +12,7 @@
  * - Native file manager reveal (shell.showItemInFolder) and directory picker
  */
 
-import { app, BrowserWindow, ipcMain, shell, dialog, clipboard } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, dialog, clipboard, session } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { spawn, exec } from 'child_process';
@@ -24,6 +24,77 @@ const __dirname = path.dirname(__filename);
 
 let mainWindow = null;
 const activeDownloads = new Map();
+
+// Shields & Ad-blocking status
+let shieldsEnabled = true;
+let shieldsBlockedStats = {
+  totalBlocked: 0,
+  youtubeAdsBlocked: 0,
+  trackersBlocked: 0,
+  estimatedBandwidthSavedKB: 0
+};
+
+// YouTube & General Ad-Blocking Filter Patterns
+const AD_TRACKER_PATTERNS = [
+  // YouTube Video Ads, Telemetry & Mid-rolls
+  '*://*.doubleclick.net/*',
+  '*://*.googlesyndication.com/*',
+  '*://*.googleadservices.com/*',
+  '*://*.youtube.com/api/stats/ads*',
+  '*://*.youtube.com/pagead/*',
+  '*://*.youtube.com/ptracking*',
+  '*://*.youtube.com/youtubei/v1/log_event*',
+  '*://*.youtube.com/api/stats/qoe*',
+  '*://*.youtube.com/get_midroll_info*',
+  '*://*.youtube.com/api/stats/watchtime*',
+  '*://adservice.google.com/*',
+  '*://static.doubleclick.net/*',
+  '*://securepubads.g.doubleclick.net/*',
+  '*://*.ytimg.com/yts/jsbin/player_ias-*ad*',
+  // General Trackers & Ad Networks
+  '*://*.adnxs.com/*',
+  '*://*.amazon-adsystem.com/*',
+  '*://*.criteo.com/*',
+  '*://*.taboola.com/*',
+  '*://*.outbrain.com/*'
+];
+
+/**
+ * Configures network interceptor for ad-blocking and privacy protection
+ */
+function setupShieldsAdBlocking() {
+  const filter = { urls: AD_TRACKER_PATTERNS };
+
+  session.defaultSession.webRequest.onBeforeRequest(filter, (details, callback) => {
+    if (!shieldsEnabled) {
+      return callback({ cancel: false });
+    }
+
+    const url = details.url || '';
+    const isYouTubeAd = url.includes('youtube.com') || url.includes('doubleclick') || url.includes('googleadservices') || url.includes('googlesyndication');
+    
+    shieldsBlockedStats.totalBlocked++;
+    if (isYouTubeAd) {
+      shieldsBlockedStats.youtubeAdsBlocked++;
+    } else {
+      shieldsBlockedStats.trackersBlocked++;
+    }
+    // Estimate ~45KB saved per ad request blocked
+    shieldsBlockedStats.estimatedBandwidthSavedKB += 45;
+
+    // Send real-time tally update to renderer
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('shields:blocked-tally', {
+        ...shieldsBlockedStats,
+        lastBlockedUrl: url.substring(0, 100),
+        shieldsEnabled
+      });
+    }
+
+    // Cancel the ad/tracker network request
+    callback({ cancel: true });
+  });
+}
 
 // Cached binary paths
 let cachedYtdlpPath = null;
@@ -1184,9 +1255,32 @@ function generateFallbackAnalysis(url) {
 }
 
 // -------------------------------------------------------------
+// Shields IPC Handlers
+// -------------------------------------------------------------
+ipcMain.handle('shields:get-status', () => {
+  return {
+    enabled: shieldsEnabled,
+    stats: shieldsBlockedStats
+  };
+});
+
+ipcMain.handle('shields:toggle', (event, enabled) => {
+  if (typeof enabled === 'boolean') {
+    shieldsEnabled = enabled;
+  } else {
+    shieldsEnabled = !shieldsEnabled;
+  }
+  return {
+    enabled: shieldsEnabled,
+    stats: shieldsBlockedStats
+  };
+});
+
+// -------------------------------------------------------------
 // App Lifecycle
 // -------------------------------------------------------------
 app.whenReady().then(() => {
+  setupShieldsAdBlocking();
   createMainWindow();
 
   app.on('activate', () => {

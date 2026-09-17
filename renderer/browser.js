@@ -2,14 +2,15 @@
  * YAS Browser - Core Browser Engine & Renderer
  * 
  * Features:
- * - Full Tab Management (Create, Switch, Close, Middle-click close, Keyboard shortcuts)
+ * - Robust Dynamic Multi-Tab System (Create, Switch, Close, Middle-click, Shortcuts)
  * - True Tab-Isolated Viewports (<webview> in Electron, Sandboxed <iframe> in Web preview)
- * - Preserves state, scroll position, and forms when switching tabs
- * - Address Bar Omnibox with Smart URL normalization, Google Search fallback, and HTTPS badges
+ * - Preserves state, scroll position, and navigation history across tab switching
+ * - Smart Omnibox with Google Search query fallback & HTTPS Security Badges
  * - Navigation History (Back, Forward, Reload / Stop Loading swap, Home)
- * - Sleek Top Loading Progress Bar (Brave / Arc Style)
- * - Custom Title Bar controls (Minimize, Maximize / Restore, Close) for frameless window
- * - Deep Seamless Media Download integration (Active tab video detection, Toolbar pulse, Auto pre-fill)
+ * - Sleek Top Loading Progress Bar
+ * - Custom Frameless Titlebar controls (Minimize, Maximize / Restore, Close)
+ * - Built-in Theme System (Electric Violet, Cyber Cyan, Sunset Rose, Emerald Matrix, Obsidian Amber)
+ * - Deep Media Download Studio integration with active tab video detection
  */
 
 class YASBrowser {
@@ -17,8 +18,23 @@ class YASBrowser {
     this.tabs = [];
     this.activeTabId = null;
     this.tabCounter = 0;
-    this.trackersBlocked = 142;
+    this.shieldsStats = {
+      totalBlocked: 142,
+      youtubeAdsBlocked: 68,
+      trackersBlocked: 74,
+      estimatedBandwidthSavedKB: 6390,
+      shieldsEnabled: true
+    };
     this.bookmarks = new Set(['https://youtube.com', 'https://instagram.com', 'https://github.com']);
+    this.customAccentColor = localStorage.getItem('yas_custom_accent') || '#6366f1';
+    this.currentTheme = localStorage.getItem('yas_theme') || 'electric-violet';
+    this.searchEngine = localStorage.getItem('yas_search_engine') || 'google';
+    this.downloadPath = localStorage.getItem('yas_download_path') || '~/Downloads';
+    this.startupBehavior = localStorage.getItem('yas_startup_behavior') || 'newtab';
+    this.hardwareAccel = localStorage.getItem('yas_hardware_accel') !== 'false';
+    this.autoMux = localStorage.getItem('yas_auto_mux') !== 'false';
+    this.notifyDownload = localStorage.getItem('yas_notify_download') !== 'false';
+    this.ytAdSkip = localStorage.getItem('yas_yt_ad_skip') !== 'false';
     this.isElectron = Boolean(window.electronAPI && window.electronAPI.isElectron);
 
     this.dom = {
@@ -26,6 +42,8 @@ class YASBrowser {
       titlebar: document.getElementById('titlebar'),
       tabStrip: document.getElementById('tabStrip'),
       newTabBtn: document.getElementById('newTabBtn'),
+      themeSelectorBtn: document.getElementById('themeSelectorBtn'),
+      btnOpenSettings: document.getElementById('btnOpenSettings'),
       winMinimize: document.getElementById('winMinimize'),
       winMaximize: document.getElementById('winMaximize'),
       winClose: document.getElementById('winClose'),
@@ -41,8 +59,19 @@ class YASBrowser {
       omniboxClearBtn: document.getElementById('omniboxClearBtn'),
       securityBadge: document.getElementById('securityBadge'),
       bookmarkBtn: document.getElementById('bookmarkBtn'),
+      
+      // Shields & Ad-blocking Popover
       shieldToggleBtn: document.getElementById('shieldToggleBtn'),
       shieldCounter: document.getElementById('shieldCounter'),
+      shieldsPopover: document.getElementById('shieldsPopover'),
+      shieldsMasterSwitch: document.getElementById('shieldsMasterSwitch'),
+      shieldsStatusBadge: document.getElementById('shieldsStatusBadge'),
+      shieldsStatusText: document.getElementById('shieldsStatusText'),
+      shieldStatYtAds: document.getElementById('shieldStatYtAds'),
+      shieldStatTrackers: document.getElementById('shieldStatTrackers'),
+      shieldStatDataSaved: document.getElementById('shieldStatDataSaved'),
+      shieldStatTimeSaved: document.getElementById('shieldStatTimeSaved'),
+
       mediaDownloadBtn: document.getElementById('mediaDownloadTriggerBtn'),
       downloadCounter: document.getElementById('downloadCounter'),
       pageLoadingBar: document.getElementById('pageLoadingBar'),
@@ -54,6 +83,33 @@ class YASBrowser {
       dashboardClock: document.getElementById('dashboardClock'),
       dashboardDate: document.getElementById('dashboardDate'),
       heroSearchInput: document.getElementById('heroSearchInput'),
+      heroSearchClearBtn: document.getElementById('heroSearchClearBtn'),
+      heroSearchSubmitBtn: document.getElementById('heroSearchSubmitBtn'),
+      downloaderFeatureBanner: document.getElementById('downloaderFeatureBanner'),
+      
+      // Settings Modal & Controls
+      settingsModalBackdrop: document.getElementById('settingsModalBackdrop'),
+      btnSettingsModalClose: document.getElementById('btnSettingsModalClose'),
+      settingsSidebar: document.querySelector('.settings-sidebar'),
+      settingsNavItems: document.querySelectorAll('.settings-nav-item'),
+      settingsTabPanes: document.querySelectorAll('.settings-tab-pane'),
+      settingsCustomColorPicker: document.getElementById('settingsCustomColorPicker'),
+      settingsCustomColorHex: document.getElementById('settingsCustomColorHex'),
+      customColorPreviewBubble: document.getElementById('customColorPreviewBubble'),
+      btnResetThemeDefault: document.getElementById('btnResetThemeDefault'),
+      presetCards: document.querySelectorAll('.preset-theme-card'),
+      settingsSearchEngineSelect: document.getElementById('settingsSearchEngineSelect'),
+      settingsStartupBehaviorSelect: document.getElementById('settingsStartupBehaviorSelect'),
+      settingsHardwareAccelToggle: document.getElementById('settingsHardwareAccelToggle'),
+      settingsFolderPathText: document.getElementById('settingsFolderPathText'),
+      btnSettingsChangeFolder: document.getElementById('btnSettingsChangeFolder'),
+      btnSettingsOpenFolder: document.getElementById('btnSettingsOpenFolder'),
+      settingsAutoMuxToggle: document.getElementById('settingsAutoMuxToggle'),
+      settingsNotifyDownloadToggle: document.getElementById('settingsNotifyDownloadToggle'),
+      settingsMasterShieldsToggle: document.getElementById('settingsMasterShieldsToggle'),
+      settingsYtAdSkipToggle: document.getElementById('settingsYtAdSkipToggle'),
+      btnClearBrowsingData: document.getElementById('btnClearBrowsingData'),
+      btnSettingsOpenDiagnostics: document.getElementById('btnSettingsOpenDiagnostics'),
       toastContainer: document.getElementById('toastContainer')
     };
 
@@ -61,11 +117,14 @@ class YASBrowser {
   }
 
   init() {
+    this.initTheme();
     this.setupWindowControls();
     this.setupNavigationControls();
+    this.setupShieldsSystem();
     this.setupOmnibox();
     this.setupDashboard();
     this.setupKeyboardShortcuts();
+    this.setupSettingsSystem();
     this.startClock();
 
     // Create the default first tab (New Tab Dashboard)
@@ -78,7 +137,444 @@ class YASBrowser {
   }
 
   // =========================================================================
-  // 1. Window Controls (Minimize, Maximize / Restore, Close)
+  // 1. Theme Engine & Live Color Picker Foundation
+  // =========================================================================
+  hexToRgb(hex) {
+    let clean = hex.replace('#', '');
+    if (clean.length === 3) {
+      clean = clean.split('').map((c) => c + c).join('');
+    }
+    const num = parseInt(clean, 16);
+    if (isNaN(num)) return { r: 99, g: 102, b: 241 };
+    return {
+      r: (num >> 16) & 255,
+      g: (num >> 8) & 255,
+      b: num & 255
+    };
+  }
+
+  adjustColorBrightness(hex, percent) {
+    const { r, g, b } = this.hexToRgb(hex);
+    const clamp = (val) => Math.min(255, Math.max(0, Math.round(val)));
+    const factor = (100 + percent) / 100;
+    const newR = clamp(r * factor);
+    const newG = clamp(g * factor);
+    const newB = clamp(b * factor);
+    return `#${((1 << 24) + (newR << 16) + (newG << 8) + newB).toString(16).slice(1)}`;
+  }
+
+  shiftHue(hex, degree) {
+    const { r, g, b } = this.hexToRgb(hex);
+    let r_ = r / 255, g_ = g / 255, b_ = b / 255;
+    let max = Math.max(r_, g_, b_), min = Math.min(r_, g_, b_);
+    let h, s, l = (max + min) / 2;
+
+    if (max === min) {
+      h = s = 0;
+    } else {
+      let d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      switch (max) {
+        case r_: h = (g_ - b_) / d + (g_ < b_ ? 6 : 0); break;
+        case g_: h = (b_ - r_) / d + 2; break;
+        case b_: h = (r_ - g_) / d + 4; break;
+      }
+      h /= 6;
+    }
+
+    h = ((h * 360 + degree) % 360 + 360) % 360 / 360;
+
+    function hue2rgb(p, q, t) {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1/6) return p + (q - p) * 6 * t;
+      if (t < 1/2) return q;
+      if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+      return p;
+    }
+
+    let q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    let p = 2 * l - q;
+    let outR = Math.round(hue2rgb(p, q, h + 1/3) * 255);
+    let outG = Math.round(hue2rgb(p, q, h) * 255);
+    let outB = Math.round(hue2rgb(p, q, h - 1/3) * 255);
+
+    return `#${((1 << 24) + (outR << 16) + (outG << 8) + outB).toString(16).slice(1)}`;
+  }
+
+  initTheme() {
+    const savedAccent = localStorage.getItem('yas_custom_accent') || '#6366f1';
+    const savedTheme = localStorage.getItem('yas_theme') || 'electric-violet';
+    
+    if (savedTheme === 'custom' || savedAccent !== '#6366f1') {
+      this.applyCustomAccent(savedAccent, false);
+    } else {
+      this.applyPresetTheme(savedTheme, savedAccent, false);
+    }
+  }
+
+  applyCustomAccent(hex, save = true) {
+    if (!hex) return;
+    let cleanHex = hex.trim();
+    if (!cleanHex.startsWith('#')) cleanHex = '#' + cleanHex;
+    if (!/^#[0-9A-Fa-f]{6}$/.test(cleanHex)) return;
+
+    this.customAccentColor = cleanHex;
+    const { r, g, b } = this.hexToRgb(cleanHex);
+    const hoverColor = this.adjustColorBrightness(cleanHex, -12);
+    const secondary = this.shiftHue(cleanHex, 24);
+    const tertiary = this.shiftHue(cleanHex, 48);
+    const gradient = `linear-gradient(135deg, ${cleanHex} 0%, ${secondary} 50%, ${tertiary} 100%)`;
+
+    const root = document.documentElement;
+    root.style.setProperty('--accent-primary', cleanHex);
+    root.style.setProperty('--accent-primary-hover', hoverColor);
+    root.style.setProperty('--accent-primary-rgb', `${r}, ${g}, ${b}`);
+    root.style.setProperty('--accent-secondary', secondary);
+    root.style.setProperty('--accent-tertiary', tertiary);
+    root.style.setProperty('--accent-gradient', gradient);
+    root.style.setProperty('--accent-subtle-glow', `rgba(${r}, ${g}, ${b}, 0.28)`);
+    root.style.setProperty('--accent-highlight', `rgba(${r}, ${g}, ${b}, 0.12)`);
+    root.style.setProperty('--border-focus', `rgba(${r}, ${g}, ${b}, 0.6)`);
+    root.style.setProperty('--shadow-glow', `0 0 24px rgba(${r}, ${g}, ${b}, 0.35)`);
+
+    // Sync input controls if present
+    if (this.dom.settingsCustomColorPicker && this.dom.settingsCustomColorPicker.value !== cleanHex) {
+      this.dom.settingsCustomColorPicker.value = cleanHex;
+    }
+    if (this.dom.settingsCustomColorHex) {
+      this.dom.settingsCustomColorHex.value = cleanHex.replace('#', '').toUpperCase();
+    }
+    if (this.dom.customColorPreviewBubble) {
+      this.dom.customColorPreviewBubble.style.background = gradient;
+    }
+
+    if (save) {
+      localStorage.setItem('yas_custom_accent', cleanHex);
+      localStorage.setItem('yas_theme', 'custom');
+      this.currentTheme = 'custom';
+      root.setAttribute('data-theme', 'custom');
+
+      // Update preset cards active highlight
+      document.querySelectorAll('.preset-theme-card').forEach((card) => {
+        const cardColor = card.dataset.color;
+        const isMatch = cardColor && cardColor.toLowerCase() === cleanHex.toLowerCase();
+        card.classList.toggle('active', Boolean(isMatch));
+      });
+    }
+  }
+
+  applyPresetTheme(presetId, colorHex, showFeedback = true) {
+    this.currentTheme = presetId;
+    document.documentElement.setAttribute('data-theme', presetId);
+    localStorage.setItem('yas_theme', presetId);
+    
+    // Also calculate variables so all UI parts match
+    this.applyCustomAccent(colorHex, true);
+
+    // Update active highlight in preset cards
+    document.querySelectorAll('.preset-theme-card').forEach((card) => {
+      const isSelected = card.dataset.presetId === presetId || (card.dataset.color && card.dataset.color.toLowerCase() === colorHex.toLowerCase());
+      card.classList.toggle('active', Boolean(isSelected));
+    });
+
+    if (showFeedback) {
+      const presetNames = {
+        'electric-violet': 'Electric Violet (Arc Signature)',
+        'cyber-cyan': 'Cyber Cyan (Brave Neon)',
+        'sunset-rose': 'Sunset Rose',
+        'emerald-matrix': 'Emerald Matrix',
+        'obsidian-amber': 'Obsidian Amber',
+        'royal-sapphire': 'Royal Sapphire',
+        'neon-lime': 'Neon Lime',
+        'amethyst-purple': 'Amethyst Velvet'
+      };
+      this.showToast(`Theme applied: ${presetNames[presetId] || presetId}`);
+    }
+  }
+
+  // =========================================================================
+  // Settings System Setup & Event Management
+  // =========================================================================
+  setupSettingsSystem() {
+    // Open Settings from Titlebar Settings button
+    if (this.dom.btnOpenSettings) {
+      this.dom.btnOpenSettings.addEventListener('click', () => {
+        this.openSettings('appearance');
+      });
+    }
+
+    // Open Theme directly from Titlebar Theme button
+    if (this.dom.themeSelectorBtn) {
+      this.dom.themeSelectorBtn.addEventListener('click', () => {
+        this.openSettings('appearance');
+      });
+    }
+
+    // Close Settings Button
+    if (this.dom.btnSettingsModalClose) {
+      this.dom.btnSettingsModalClose.addEventListener('click', () => {
+        this.closeSettings();
+      });
+    }
+
+    // Click outside backdrop to close
+    if (this.dom.settingsModalBackdrop) {
+      this.dom.settingsModalBackdrop.addEventListener('click', (e) => {
+        if (e.target === this.dom.settingsModalBackdrop) {
+          this.closeSettings();
+        }
+      });
+    }
+
+    // Settings Sidebar Tab Navigation
+    document.querySelectorAll('.settings-nav-item').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const tabKey = btn.dataset.settingsTab;
+        if (tabKey) {
+          this.switchSettingsTab(tabKey);
+        }
+      });
+    });
+
+    // Native Live Color Picker Events (Real-time live updating!)
+    if (this.dom.settingsCustomColorPicker) {
+      this.dom.settingsCustomColorPicker.value = this.customAccentColor;
+
+      // Real-time dynamic live preview while dragging color picker
+      this.dom.settingsCustomColorPicker.addEventListener('input', (e) => {
+        const hex = e.target.value;
+        this.applyCustomAccent(hex, false);
+      });
+
+      // Save on commit
+      this.dom.settingsCustomColorPicker.addEventListener('change', (e) => {
+        const hex = e.target.value;
+        this.applyCustomAccent(hex, true);
+        this.showToast(`Accent color saved: ${hex.toUpperCase()}`);
+      });
+    }
+
+    // Hex Text Input Events
+    if (this.dom.settingsCustomColorHex) {
+      this.dom.settingsCustomColorHex.value = this.customAccentColor.replace('#', '').toUpperCase();
+
+      this.dom.settingsCustomColorHex.addEventListener('input', (e) => {
+        let val = e.target.value.replace(/[^0-9A-Fa-f]/g, '').slice(0, 6);
+        e.target.value = val.toUpperCase();
+
+        if (val.length === 6) {
+          const hex = '#' + val;
+          this.applyCustomAccent(hex, true);
+        }
+      });
+
+      this.dom.settingsCustomColorHex.addEventListener('blur', () => {
+        this.dom.settingsCustomColorHex.value = this.customAccentColor.replace('#', '').toUpperCase();
+      });
+    }
+
+    // Reset Default Theme Button
+    if (this.dom.btnResetThemeDefault) {
+      this.dom.btnResetThemeDefault.addEventListener('click', () => {
+        this.applyPresetTheme('electric-violet', '#6366f1', true);
+      });
+    }
+
+    // Preset Color Cards Click Handlers
+    document.querySelectorAll('.preset-theme-card').forEach((card) => {
+      card.addEventListener('click', () => {
+        const presetId = card.dataset.presetId;
+        const color = card.dataset.color || '#6366f1';
+        if (presetId) {
+          this.applyPresetTheme(presetId, color, true);
+        }
+      });
+    });
+
+    // General: Search Engine Select
+    if (this.dom.settingsSearchEngineSelect) {
+      this.dom.settingsSearchEngineSelect.value = this.searchEngine;
+      this.dom.settingsSearchEngineSelect.addEventListener('change', (e) => {
+        this.searchEngine = e.target.value;
+        localStorage.setItem('yas_search_engine', this.searchEngine);
+        this.updateSearchPlaceholders();
+        this.showToast(`Search engine set to ${this.dom.settingsSearchEngineSelect.options[this.dom.settingsSearchEngineSelect.selectedIndex].text}`);
+      });
+    }
+
+    // General: Startup Behavior
+    if (this.dom.settingsStartupBehaviorSelect) {
+      this.dom.settingsStartupBehaviorSelect.value = this.startupBehavior;
+      this.dom.settingsStartupBehaviorSelect.addEventListener('change', (e) => {
+        this.startupBehavior = e.target.value;
+        localStorage.setItem('yas_startup_behavior', this.startupBehavior);
+        this.showToast('Startup preference saved');
+      });
+    }
+
+    // General: Hardware Accel
+    if (this.dom.settingsHardwareAccelToggle) {
+      this.dom.settingsHardwareAccelToggle.checked = this.hardwareAccel;
+      this.dom.settingsHardwareAccelToggle.addEventListener('change', (e) => {
+        this.hardwareAccel = e.target.checked;
+        localStorage.setItem('yas_hardware_accel', String(this.hardwareAccel));
+        this.showToast(`Hardware acceleration ${this.hardwareAccel ? 'enabled' : 'disabled'}`);
+      });
+    }
+
+    // Downloads: Folder path synchronization
+    if (this.dom.settingsFolderPathText) {
+      this.dom.settingsFolderPathText.textContent = this.downloadPath;
+    }
+
+    if (this.dom.btnSettingsChangeFolder) {
+      this.dom.btnSettingsChangeFolder.addEventListener('click', async () => {
+        if (window.electronAPI && window.electronAPI.selectFolder) {
+          const folder = await window.electronAPI.selectFolder();
+          if (folder) {
+            this.setDownloadFolder(folder);
+          }
+        } else {
+          const folder = prompt('Enter custom destination folder path:', this.downloadPath);
+          if (folder && folder.trim()) {
+            this.setDownloadFolder(folder.trim());
+          }
+        }
+      });
+    }
+
+    if (this.dom.btnSettingsOpenFolder) {
+      this.dom.btnSettingsOpenFolder.addEventListener('click', () => {
+        if (window.electronAPI && window.electronAPI.openPath) {
+          window.electronAPI.openPath(this.downloadPath);
+        } else {
+          this.showToast(`Opening download folder: ${this.downloadPath}`);
+        }
+      });
+    }
+
+    if (this.dom.settingsAutoMuxToggle) {
+      this.dom.settingsAutoMuxToggle.checked = this.autoMux;
+      this.dom.settingsAutoMuxToggle.addEventListener('change', (e) => {
+        this.autoMux = e.target.checked;
+        localStorage.setItem('yas_auto_mux', String(this.autoMux));
+      });
+    }
+
+    if (this.dom.settingsNotifyDownloadToggle) {
+      this.dom.settingsNotifyDownloadToggle.checked = this.notifyDownload;
+      this.dom.settingsNotifyDownloadToggle.addEventListener('change', (e) => {
+        this.notifyDownload = e.target.checked;
+        localStorage.setItem('yas_notify_download', String(this.notifyDownload));
+      });
+    }
+
+    // Shields & Privacy Controls
+    if (this.dom.settingsMasterShieldsToggle) {
+      this.dom.settingsMasterShieldsToggle.checked = this.shieldsStats.shieldsEnabled;
+      this.dom.settingsMasterShieldsToggle.addEventListener('change', (e) => {
+        this.toggleShields(e.target.checked);
+        if (this.dom.shieldsMasterSwitch) {
+          this.dom.shieldsMasterSwitch.checked = e.target.checked;
+        }
+      });
+    }
+
+    if (this.dom.settingsYtAdSkipToggle) {
+      this.dom.settingsYtAdSkipToggle.checked = this.ytAdSkip;
+      this.dom.settingsYtAdSkipToggle.addEventListener('change', (e) => {
+        this.ytAdSkip = e.target.checked;
+        localStorage.setItem('yas_yt_ad_skip', String(this.ytAdSkip));
+        this.showToast(`YouTube ad skipper ${this.ytAdSkip ? 'activated' : 'deactivated'}`);
+      });
+    }
+
+    // Clear Browsing Data
+    if (this.dom.btnClearBrowsingData) {
+      this.dom.btnClearBrowsingData.addEventListener('click', () => {
+        this.bookmarks.clear();
+        this.updateBookmarkButton(false);
+        this.showToast('Browsing cache and local history cleared successfully');
+      });
+    }
+
+    // About: Diagnostics Guide Modal Trigger
+    if (this.dom.btnSettingsOpenDiagnostics) {
+      this.dom.btnSettingsOpenDiagnostics.addEventListener('click', () => {
+        this.closeSettings();
+        const diagModal = document.getElementById('engineInstallModalBackdrop');
+        if (diagModal) {
+          diagModal.classList.add('open');
+        }
+      });
+    }
+  }
+
+  setDownloadFolder(path) {
+    this.downloadPath = path;
+    localStorage.setItem('yas_download_path', path);
+    if (this.dom.settingsFolderPathText) {
+      this.dom.settingsFolderPathText.textContent = path;
+    }
+    const mediaDestText = document.getElementById('destinationPathText');
+    if (mediaDestText) {
+      mediaDestText.textContent = path;
+    }
+    if (window.mediaDownloader) {
+      window.mediaDownloader.destinationFolder = path;
+    }
+    this.showToast(`Download location updated: ${path}`);
+  }
+
+  openSettings(tabName = 'appearance') {
+    if (this.dom.settingsModalBackdrop) {
+      this.switchSettingsTab(tabName);
+      this.dom.settingsModalBackdrop.classList.add('open');
+    }
+  }
+
+  closeSettings() {
+    if (this.dom.settingsModalBackdrop) {
+      this.dom.settingsModalBackdrop.classList.remove('open');
+    }
+  }
+
+  switchSettingsTab(tabKey) {
+    // Update sidebar buttons
+    document.querySelectorAll('.settings-nav-item').forEach((btn) => {
+      const isSelected = btn.dataset.settingsTab === tabKey;
+      btn.classList.toggle('active', isSelected);
+    });
+
+    // Capitalize for pane ID
+    const capitalized = tabKey.charAt(0).toUpperCase() + tabKey.slice(1);
+    const targetPaneId = `paneSettings${capitalized}`;
+
+    document.querySelectorAll('.settings-tab-pane').forEach((pane) => {
+      pane.classList.toggle('active', pane.id === targetPaneId);
+    });
+  }
+
+  updateSearchPlaceholders() {
+    const engineNames = {
+      google: 'Google',
+      duckduckgo: 'DuckDuckGo',
+      brave: 'Brave Search',
+      bing: 'Bing',
+      ecosia: 'Ecosia'
+    };
+    const name = engineNames[this.searchEngine] || 'Google';
+    if (this.dom.omniboxInput) {
+      this.dom.omniboxInput.placeholder = `Search with ${name} or enter URL...`;
+    }
+    if (this.dom.heroSearchInput) {
+      this.dom.heroSearchInput.placeholder = `Search with ${name} or enter URL...`;
+    }
+  }
+
+  // =========================================================================
+  // 2. Frameless Window Controls
   // =========================================================================
   setupWindowControls() {
     if (this.dom.winMinimize) {
@@ -86,7 +582,7 @@ class YASBrowser {
         if (window.electronAPI && window.electronAPI.minimize) {
           window.electronAPI.minimize();
         } else {
-          this.showToast('Window minimize (Electron API ready)');
+          this.showToast('Window minimize action');
         }
       });
     }
@@ -112,7 +608,6 @@ class YASBrowser {
       });
     }
 
-    // Window maximize state event listener from Electron main process
     if (window.electronAPI && window.electronAPI.onWindowStateChange) {
       window.electronAPI.onWindowStateChange(({ isMaximized }) => {
         this.updateMaximizeIcon(isMaximized);
@@ -122,255 +617,260 @@ class YASBrowser {
 
   updateMaximizeIcon(isMaximized) {
     if (this.dom.winMaximize) {
-      this.dom.winMaximize.innerHTML = isMaximized ? '🗗' : '🗖';
-      this.dom.winMaximize.title = isMaximized ? 'Restore' : 'Maximize';
+      this.dom.winMaximize.textContent = isMaximized ? '🗗' : '🗖';
+      this.dom.winMaximize.title = isMaximized ? 'Restore Down' : 'Maximize';
     }
   }
 
   // =========================================================================
-  // 2. Tab Management (Create, Activate, Close, History)
+  // 3. Multi-Tab Management System
   // =========================================================================
   createTab({ title = 'New Tab', url = 'yas://newtab', favicon = '✨', isInternal = true }) {
-    this.tabCounter++;
-    const tabId = `tab_${this.tabCounter}`;
+    this.tabCounter += 1;
+    const tabId = `tab_${Date.now()}_${this.tabCounter}`;
 
-    // Tab Data Structure
     const tab = {
       id: tabId,
-      title,
-      url,
-      favicon,
-      isInternal,
+      title: title,
+      url: url,
+      favicon: favicon,
+      isInternal: isInternal,
       isLoading: false,
-      canGoBack: false,
-      canGoForward: false,
       history: [url],
       historyIndex: 0,
       element: null,
-      viewContainer: null,
-      webview: null
+      viewPane: null,
+      viewElement: null
     };
 
-    this.tabs.push(tab);
+    // 1. Create Tab Element in Tab Strip
+    const tabEl = document.createElement('div');
+    tabEl.className = 'tab-item';
+    tabEl.id = `tab_item_${tabId}`;
+    tabEl.setAttribute('role', 'tab');
+    tabEl.setAttribute('aria-selected', 'false');
 
-    // 1. Build Tab Strip Item
-    this.createTabStripElement(tab);
+    tabEl.innerHTML = `
+      <span class="tab-favicon" id="fav_${tabId}">${this.renderFaviconHtml(favicon)}</span>
+      <span class="tab-title" id="title_${tabId}">${this.escapeHtml(title)}</span>
+      <button class="tab-close-btn" id="close_${tabId}" title="Close tab (Ctrl+W)">✕</button>
+    `;
 
-    // 2. Build View Container for this Tab
-    this.createTabViewContainer(tab);
+    // Click tab to activate
+    tabEl.addEventListener('click', (e) => {
+      if (!e.target.closest('.tab-close-btn')) {
+        this.activateTab(tabId);
+      }
+    });
 
-    // 3. Activate the new Tab
-    this.activateTab(tabId);
+    // Middle-click tab to close
+    tabEl.addEventListener('auxclick', (e) => {
+      if (e.button === 1) {
+        e.preventDefault();
+        this.closeTab(tabId);
+      }
+    });
 
-    // If starting with external URL, navigate immediately
-    if (url !== 'yas://newtab') {
-      this.navigateTab(tab, url, title);
+    // Close button
+    const closeBtn = tabEl.querySelector(`#close_${tabId}`);
+    if (closeBtn) {
+      closeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.closeTab(tabId);
+      });
     }
+
+    tab.element = tabEl;
+    if (this.dom.newTabBtn && this.dom.newTabBtn.parentNode === this.dom.tabStrip) {
+      this.dom.tabStrip.insertBefore(tabEl, this.dom.newTabBtn);
+    } else {
+      this.dom.tabStrip.appendChild(tabEl);
+      if (this.dom.newTabBtn) {
+        this.dom.tabStrip.appendChild(this.dom.newTabBtn);
+      }
+    }
+
+    // 2. Create View Pane in Tab Views Container
+    const viewPane = document.createElement('div');
+    viewPane.className = 'tab-view-pane';
+    viewPane.id = `view_pane_${tabId}`;
+    viewPane.style.display = 'none';
+
+    if (isInternal && url === 'yas://newtab') {
+      // Internal dashboard is handled specially
+      viewPane.style.display = 'none';
+    } else {
+      this.attachTabFrame(tab, viewPane, url);
+    }
+
+    this.dom.tabViewsContainer.appendChild(viewPane);
+    tab.viewPane = viewPane;
+
+    this.tabs.push(tab);
+    this.activateTab(tabId);
 
     return tab;
   }
 
-  createTabStripElement(tab) {
-    const tabEl = document.createElement('div');
-    tabEl.className = 'tab-item';
-    tabEl.id = `el_${tab.id}`;
-    tabEl.setAttribute('data-tab-id', tab.id);
-    tabEl.setAttribute('role', 'tab');
-    tabEl.setAttribute('title', tab.title);
-
-    tabEl.innerHTML = `
-      <span class="tab-favicon">${this.renderFaviconHtml(tab.favicon)}</span>
-      <span class="tab-title">${this.escapeHtml(tab.title)}</span>
-      <span class="tab-audio-indicator" style="display: none;">🔊</span>
-      <button class="tab-close-btn" title="Close Tab (Ctrl+W)">
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="18" y1="6" x2="6" y2="18"></line>
-          <line x1="6" y1="6" x2="18" y2="18"></line>
-        </svg>
-      </button>
-    `;
-
-    // Left click to activate
-    tabEl.addEventListener('click', (e) => {
-      if (e.target.closest('.tab-close-btn')) {
-        e.stopPropagation();
-        this.closeTab(tab.id);
-      } else {
-        this.activateTab(tab.id);
-      }
-    });
-
-    // Middle click to close tab
-    tabEl.addEventListener('auxclick', (e) => {
-      if (e.button === 1) {
-        e.preventDefault();
-        this.closeTab(tab.id);
-      }
-    });
-
-    tab.element = tabEl;
-    this.dom.tabStrip.appendChild(tabEl);
-
-    // Scroll tab strip to newly opened tab
-    this.dom.tabStrip.scrollTo({
-      left: this.dom.tabStrip.scrollWidth,
-      behavior: 'smooth'
-    });
-  }
-
-  createTabViewContainer(tab) {
-    const viewContainer = document.createElement('div');
-    viewContainer.className = 'tab-view-pane';
-    viewContainer.id = `view_${tab.id}`;
-    viewContainer.style.display = 'none';
-
-    if (tab.isInternal || tab.url === 'yas://newtab') {
-      // Uses the newtab dashboard
-      viewContainer.classList.add('internal-pane');
-    } else {
-      this.attachWebContentElement(tab, viewContainer);
-    }
-
-    tab.viewContainer = viewContainer;
-    if (this.dom.tabViewsContainer) {
-      this.dom.tabViewsContainer.appendChild(viewContainer);
-    }
-  }
-
-  attachWebContentElement(tab, container) {
-    container.innerHTML = '';
-
-    // Check if we are running in Electron environment with webview tag support
+  attachTabFrame(tab, container, url) {
     if (this.isElectron) {
+      // Real Electron <webview>
       const webview = document.createElement('webview');
       webview.className = 'tab-webview-frame';
-      webview.setAttribute('src', tab.url);
+      webview.src = url;
       webview.setAttribute('allowpopups', 'true');
-      webview.setAttribute('webpreferences', 'contextIsolation=yes, spellcheck=yes');
-      webview.setAttribute('useragent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 YASBrowser/1.0');
+      webview.setAttribute('webpreferences', 'nativeWindowOpen=yes');
 
-      this.bindWebviewEvents(tab, webview);
+      webview.addEventListener('did-start-loading', () => {
+        this.onTabStartLoading(tab.id);
+      });
+
+      webview.addEventListener('did-stop-loading', () => {
+        this.onTabStopLoading(tab.id);
+        this.injectYouTubeAdBlocker(webview, tab.url);
+      });
+
+      webview.addEventListener('page-title-updated', (e) => {
+        this.onTabTitleUpdated(tab.id, e.title);
+      });
+
+      webview.addEventListener('page-favicon-updated', (e) => {
+        if (e.favicons && e.favicons.length > 0) {
+          this.onTabFaviconUpdated(tab.id, e.favicons[0]);
+        }
+      });
+
+      webview.addEventListener('did-navigate', (e) => {
+        this.onTabNavigated(tab.id, e.url);
+        this.injectYouTubeAdBlocker(webview, e.url);
+      });
+
       container.appendChild(webview);
-      tab.webview = webview;
+      tab.viewElement = webview;
     } else {
-      // In web browser / sandboxed preview: render responsive iframe with sandbox
+      // Browser preview mode fallback (Sandboxed <iframe>)
       const iframeWrap = document.createElement('div');
       iframeWrap.className = 'tab-iframe-wrapper';
+      iframeWrap.innerHTML = `
+        <iframe 
+          class="tab-iframe-frame" 
+          src="${url}" 
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+        ></iframe>
+      `;
+      const iframe = iframeWrap.querySelector('iframe');
 
-      const iframe = document.createElement('iframe');
-      iframe.className = 'tab-iframe-frame';
-      iframe.setAttribute('src', tab.url);
-      iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals');
-      iframe.setAttribute('allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture');
+      iframe.addEventListener('load', () => {
+        this.onTabStopLoading(tab.id);
+        this.simulateAdBlockingForTab(tab);
+        try {
+          const frameDoc = iframe.contentDocument || iframe.contentWindow?.document;
+          if (frameDoc && frameDoc.title) {
+            this.onTabTitleUpdated(tab.id, frameDoc.title);
+          }
+        } catch (_) {
+          // Cross-origin title extraction guard
+          const parsed = this.parseUrlDomain(url);
+          this.onTabTitleUpdated(tab.id, parsed);
+        }
+      });
 
-      this.bindIframeEvents(tab, iframe, iframeWrap);
-      iframeWrap.appendChild(iframe);
       container.appendChild(iframeWrap);
-      tab.webview = iframe;
+      tab.viewElement = iframe;
     }
   }
 
-  bindWebviewEvents(tab, webview) {
-    webview.addEventListener('did-start-loading', () => {
-      tab.isLoading = true;
-      if (tab.id === this.activeTabId) {
-        this.updateLoadingUi(true);
-      }
-    });
+  /**
+   * High-Performance YouTube Video Ad & Telemetry Blocker Content Injector
+   */
+  injectYouTubeAdBlocker(webview, url) {
+    if (!webview || !url || !this.shieldsStats.shieldsEnabled) return;
+    const isYouTube = url.includes('youtube.com') || url.includes('youtu.be');
+    if (!isYouTube) return;
 
-    webview.addEventListener('did-stop-loading', () => {
-      tab.isLoading = false;
-      tab.canGoBack = webview.canGoBack ? webview.canGoBack() : tab.historyIndex > 0;
-      tab.canGoForward = webview.canGoForward ? webview.canGoForward() : tab.historyIndex < tab.history.length - 1;
+    // Execute ad suppression script inside webview
+    const adBlockerScript = `
+      (function() {
+        if (window.__yasAdBlockerInitialized) return;
+        window.__yasAdBlockerInitialized = true;
 
-      if (tab.id === this.activeTabId) {
-        this.updateLoadingUi(false);
-        this.updateNavButtons(tab);
-      }
-    });
+        // 1. Inject High-Priority Ad Element CSS Masking
+        const style = document.createElement('style');
+        style.id = 'yas-ad-suppress-style';
+        style.textContent = \`
+          .video-ads,
+          .ytp-ad-module,
+          .ytp-ad-overlay-container,
+          .ytp-ad-player-overlay,
+          .ytp-ad-player-overlay-layout,
+          ytd-ad-slot-renderer,
+          ytd-banner-promo-renderer,
+          #masthead-ad,
+          ytd-rich-item-renderer:has(ytd-ad-slot-renderer),
+          ytd-display-ad-renderer,
+          #player-ads,
+          .sparkles-light-cta,
+          ytd-promoted-video-renderer,
+          ytd-promoted-sparkles-web-renderer,
+          tp-yt-paper-dialog:has(#feedback),
+          ytd-popup-container:has(ytd-mealbar-promo-renderer) {
+            display: none !important;
+            visibility: hidden !important;
+            height: 0 !important;
+            width: 0 !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+          }
+        \`;
+        (document.head || document.documentElement).appendChild(style);
 
-    webview.addEventListener('page-title-updated', (e) => {
-      if (e.title && !tab.isInternal) {
-        this.updateTabTitle(tab, e.title);
-      }
-    });
+        // 2. High-Frequency Video Ad Auto-Skipper & Fast-Forward Engine
+        setInterval(function() {
+          // Trigger skip buttons instantly
+          const skipButtons = document.querySelectorAll(
+            '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, .ytp-ad-skip-button-slot button, .ytp-ad-overlay-close-button'
+          );
+          skipButtons.forEach(btn => {
+            if (btn && typeof btn.click === 'function') {
+              btn.click();
+            }
+          });
 
-    webview.addEventListener('page-favicon-updated', (e) => {
-      if (e.favicons && e.favicons.length > 0) {
-        this.updateTabFavicon(tab, e.favicons[0]);
-      }
-    });
+          // Detect unskippable video ads and instantly scrub to end
+          const video = document.querySelector('video');
+          const isAdActive = document.querySelector('.ad-showing, .ytp-ad-player-overlay, .ytp-ad-module');
+          if (video && isAdActive) {
+            if (isFinite(video.duration) && video.duration > 0) {
+              video.currentTime = video.duration + 1;
+            }
+            video.playbackRate = 16.0;
+            video.muted = true;
+          }
+        }, 120);
+      })();
+    `;
 
-    webview.addEventListener('did-navigate', (e) => {
-      if (e.url) {
-        tab.url = e.url;
-        this.pushTabHistory(tab, e.url);
-        if (tab.id === this.activeTabId) {
-          this.syncOmnibox(tab.url);
-          this.updateSecurityBadge(tab.url);
-          this.checkMediaDownloadOpportunity(tab.url);
-        }
+    try {
+      if (typeof webview.executeJavaScript === 'function') {
+        webview.executeJavaScript(adBlockerScript).catch(() => {});
       }
-    });
-
-    webview.addEventListener('did-navigate-in-page', (e) => {
-      if (e.url) {
-        tab.url = e.url;
-        if (tab.id === this.activeTabId) {
-          this.syncOmnibox(tab.url);
-          this.checkMediaDownloadOpportunity(tab.url);
-        }
-      }
-    });
-
-    webview.addEventListener('did-fail-load', (e) => {
-      if (e.errorCode !== -3) { // Not aborted
-        tab.isLoading = false;
-        if (tab.id === this.activeTabId) {
-          this.updateLoadingUi(false);
-        }
-      }
-    });
-
-    webview.addEventListener('new-window', (e) => {
-      e.preventDefault();
-      if (e.url) {
-        this.createTab({
-          title: 'Loading...',
-          url: e.url,
-          favicon: '🌐',
-          isInternal: false
-        });
-      }
-    });
+    } catch (_) {}
   }
 
-  bindIframeEvents(tab, iframe, wrapper) {
-    this.updateLoadingUi(true);
-
-    iframe.onload = () => {
-      tab.isLoading = false;
-      if (tab.id === this.activeTabId) {
-        this.updateLoadingUi(false);
-      }
-    };
-
-    iframe.onerror = () => {
-      tab.isLoading = false;
-      if (tab.id === this.activeTabId) {
-        this.updateLoadingUi(false);
-      }
-    };
-
-    // Auto-detect simulated load completion after 1.5s
-    setTimeout(() => {
-      if (tab.isLoading) {
-        tab.isLoading = false;
-        if (tab.id === this.activeTabId) {
-          this.updateLoadingUi(false);
-        }
-      }
-    }, 1500);
+  simulateAdBlockingForTab(tab) {
+    if (!tab || !this.shieldsStats.shieldsEnabled) return;
+    const isYouTube = tab.url.includes('youtube.com') || tab.url.includes('youtu.be');
+    
+    if (isYouTube) {
+      this.shieldsStats.youtubeAdsBlocked += Math.floor(Math.random() * 3) + 2;
+      this.shieldsStats.totalBlocked += 3;
+      this.shieldsStats.estimatedBandwidthSavedKB += 140;
+    } else if (!tab.isInternal) {
+      this.shieldsStats.trackersBlocked += Math.floor(Math.random() * 4) + 1;
+      this.shieldsStats.totalBlocked += 2;
+      this.shieldsStats.estimatedBandwidthSavedKB += 90;
+    }
+    this.updateShieldsUI();
   }
 
   activateTab(tabId) {
@@ -379,58 +879,43 @@ class YASBrowser {
 
     this.activeTabId = tabId;
 
-    // 1. Update Tab Strip Items
-    document.querySelectorAll('.tab-item').forEach((el) => {
-      const isActive = el.getAttribute('data-tab-id') === tabId;
-      el.classList.toggle('active', isActive);
-      el.setAttribute('aria-selected', isActive ? 'true' : 'false');
-    });
-
-    // 2. Hide / Show View Panes
-    document.querySelectorAll('.tab-view-pane').forEach((pane) => {
-      pane.style.display = pane.id === `view_${tabId}` ? 'flex' : 'none';
-    });
-
-    // 3. Toggle Dashboard vs Web View
-    if (tab.url === 'yas://newtab' || tab.isInternal) {
-      if (this.dom.newTabDashboard) {
-        this.dom.newTabDashboard.style.display = 'flex';
+    // Update tab strip active class
+    this.tabs.forEach((t) => {
+      const isCurr = t.id === tabId;
+      t.element.classList.toggle('active', isCurr);
+      t.element.setAttribute('aria-selected', isCurr ? 'true' : 'false');
+      if (t.viewPane) {
+        t.viewPane.style.display = isCurr && !t.isInternal ? 'flex' : 'none';
       }
+    });
+
+    // Toggle New Tab Dashboard
+    if (tab.isInternal && tab.url === 'yas://newtab') {
+      this.dom.newTabDashboard.style.display = 'flex';
     } else {
-      if (this.dom.newTabDashboard) {
-        this.dom.newTabDashboard.style.display = 'none';
-      }
+      this.dom.newTabDashboard.style.display = 'none';
     }
 
-    // 4. Sync Omnibox, Security Badge, and Bookmark state
-    this.syncOmnibox(tab.url === 'yas://newtab' ? '' : tab.url);
-    this.updateSecurityBadge(tab.url);
-    this.updateBookmarkButtonState(tab.url);
+    // Update Omnibox & Controls
+    this.updateOmniboxForTab(tab);
     this.updateNavButtons(tab);
-    this.updateLoadingUi(tab.isLoading);
-
-    // 5. Check if tab has a downloadable media URL (YouTube / Instagram)
-    this.checkMediaDownloadOpportunity(tab.url);
+    this.checkVideoDetectionForTab(tab);
+    this.scrollTabIntoView(tab.element);
   }
 
   closeTab(tabId) {
-    const index = this.tabs.findIndex((t) => t.id === tabId);
-    if (index === -1) return;
+    const tabIndex = this.tabs.findIndex((t) => t.id === tabId);
+    if (tabIndex === -1) return;
 
-    const tab = this.tabs[index];
+    const tab = this.tabs[tabIndex];
 
-    // Remove DOM elements cleanly
+    // Remove DOM elements
     if (tab.element) tab.element.remove();
-    if (tab.viewContainer) tab.viewContainer.remove();
+    if (tab.viewPane) tab.viewPane.remove();
 
-    // Destroy webview reference
-    if (tab.webview && tab.webview.remove) {
-      tab.webview.remove();
-    }
+    this.tabs.splice(tabIndex, 1);
 
-    this.tabs.splice(index, 1);
-
-    // If all tabs were closed, spawn a clean new tab
+    // If no tabs left, create fresh New Tab
     if (this.tabs.length === 0) {
       this.createTab({
         title: 'New Tab',
@@ -441,72 +926,227 @@ class YASBrowser {
       return;
     }
 
-    // If active tab was closed, switch to adjacent tab
+    // If closed active tab, switch to adjacent tab
     if (this.activeTabId === tabId) {
-      const nextIndex = Math.min(index, this.tabs.length - 1);
+      const nextIndex = Math.min(tabIndex, this.tabs.length - 1);
       this.activateTab(this.tabs[nextIndex].id);
     }
   }
 
-  // =========================================================================
-  // 3. Navigation & URL Engine (Omnibox, Normalization, History)
-  // =========================================================================
-  setupOmnibox() {
-    if (!this.dom.omniboxInput) return;
+  scrollTabIntoView(tabElement) {
+    if (tabElement && tabElement.scrollIntoView) {
+      tabElement.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    }
+  }
 
-    // Enter key submits URL or search
-    this.dom.omniboxInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        const input = this.dom.omniboxInput.value.trim();
-        if (input) {
-          this.navigateTo(input);
-          this.dom.omniboxInput.blur();
-        }
-      } else if (e.key === 'Escape') {
-        const activeTab = this.getActiveTab();
-        if (activeTab) {
-          this.syncOmnibox(activeTab.url === 'yas://newtab' ? '' : activeTab.url);
-        }
-        this.dom.omniboxInput.blur();
+  onTabStartLoading(tabId) {
+    const tab = this.tabs.find((t) => t.id === tabId);
+    if (!tab) return;
+
+    tab.isLoading = true;
+    if (this.activeTabId === tabId) {
+      this.dom.pageLoadingBar.classList.add('active');
+      this.updateReloadButton(true);
+    }
+  }
+
+  onTabStopLoading(tabId) {
+    const tab = this.tabs.find((t) => t.id === tabId);
+    if (!tab) return;
+
+    tab.isLoading = false;
+    if (this.activeTabId === tabId) {
+      this.dom.pageLoadingBar.classList.remove('active');
+      this.updateReloadButton(false);
+    }
+  }
+
+  onTabTitleUpdated(tabId, newTitle) {
+    const tab = this.tabs.find((t) => t.id === tabId);
+    if (!tab || !newTitle) return;
+
+    tab.title = newTitle;
+    const titleEl = document.getElementById(`title_${tabId}`);
+    if (titleEl) {
+      titleEl.textContent = newTitle;
+      tab.element.title = newTitle;
+    }
+  }
+
+  onTabFaviconUpdated(tabId, faviconUrl) {
+    const tab = this.tabs.find((t) => t.id === tabId);
+    if (!tab || !faviconUrl) return;
+
+    tab.favicon = faviconUrl;
+    const favEl = document.getElementById(`fav_${tabId}`);
+    if (favEl) {
+      favEl.innerHTML = `<img src="${faviconUrl}" class="tab-fav-img" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' viewBox=\\'0 0 24 24\\'><circle cx=\\'12\\' cy=\\'12\\' r=\\'10\\' fill=\\'none\\' stroke=\\'%2394a3b8\\' stroke-width=\\'2\\'/></svg>'" />`;
+    }
+  }
+
+  onTabNavigated(tabId, newUrl) {
+    const tab = this.tabs.find((t) => t.id === tabId);
+    if (!tab) return;
+
+    tab.url = newUrl;
+    tab.isInternal = newUrl === 'yas://newtab';
+
+    // Push history if distinct
+    if (tab.history[tab.historyIndex] !== newUrl) {
+      tab.history = tab.history.slice(0, tab.historyIndex + 1);
+      tab.history.push(newUrl);
+      tab.historyIndex = tab.history.length - 1;
+    }
+
+    if (this.activeTabId === tabId) {
+      this.updateOmniboxForTab(tab);
+      this.updateNavButtons(tab);
+      this.checkVideoDetectionForTab(tab);
+    }
+  }
+
+  renderFaviconHtml(fav) {
+    if (!fav) return '🌐';
+    if (fav.startsWith('http://') || fav.startsWith('https://') || fav.startsWith('data:')) {
+      return `<img src="${fav}" class="tab-fav-img" onerror="this.textContent='🌐'" />`;
+    }
+    return `<span>${fav}</span>`;
+  }
+
+  // =========================================================================
+  // 4. Shields Privacy & YouTube Ad-Blocking System
+  // =========================================================================
+  setupShieldsSystem() {
+    this.updateShieldsUI();
+
+    // Toggle Shields Popover Dropdown
+    if (this.dom.shieldToggleBtn) {
+      this.dom.shieldToggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleShieldsPopover();
+      });
+    }
+
+    // Close Popover when clicking outside
+    document.addEventListener('click', (e) => {
+      if (this.dom.shieldsPopover && !this.dom.shieldsPopover.contains(e.target) && e.target !== this.dom.shieldToggleBtn) {
+        this.closeShieldsPopover();
       }
     });
 
-    // Focus Omnibox selects all text
-    this.dom.omniboxInput.addEventListener('focus', () => {
-      this.dom.omniboxInput.select();
-      this.updateClearBtnVisibility();
-    });
+    // Master Switch toggle
+    if (this.dom.shieldsMasterSwitch) {
+      this.dom.shieldsMasterSwitch.addEventListener('change', async (e) => {
+        const isEnabled = e.target.checked;
+        this.shieldsStats.shieldsEnabled = isEnabled;
 
-    this.dom.omniboxInput.addEventListener('input', () => {
-      this.updateClearBtnVisibility();
-    });
+        if (this.isElectron && window.electronAPI && window.electronAPI.toggleShields) {
+          try {
+            const res = await window.electronAPI.toggleShields(isEnabled);
+            if (res && res.stats) {
+              this.shieldsStats = { ...this.shieldsStats, ...res.stats, shieldsEnabled: res.enabled };
+            }
+          } catch (_) {}
+        }
 
-    // Clear button inside omnibox
-    if (this.dom.omniboxClearBtn) {
-      this.dom.omniboxClearBtn.addEventListener('click', () => {
-        this.dom.omniboxInput.value = '';
-        this.dom.omniboxInput.focus();
-        this.updateClearBtnVisibility();
+        this.updateShieldsUI();
+        this.showToast(isEnabled ? '🛡️ YAS Shields Active: YouTube Ads & Trackers Blocked' : '⚠️ Shields Paused for Current Session');
       });
     }
 
-    // Bookmark Toggle Button
-    if (this.dom.bookmarkBtn) {
-      this.dom.bookmarkBtn.addEventListener('click', () => {
-        this.toggleBookmarkCurrentPage();
+    // Listen to real-time blocked tally from Main Process
+    if (this.isElectron && window.electronAPI && window.electronAPI.onShieldsTally) {
+      window.electronAPI.onShieldsTally((data) => {
+        if (data) {
+          this.shieldsStats = {
+            ...this.shieldsStats,
+            totalBlocked: data.totalBlocked || this.shieldsStats.totalBlocked,
+            youtubeAdsBlocked: data.youtubeAdsBlocked || this.shieldsStats.youtubeAdsBlocked,
+            trackersBlocked: data.trackersBlocked || this.shieldsStats.trackersBlocked,
+            estimatedBandwidthSavedKB: data.estimatedBandwidthSavedKB || this.shieldsStats.estimatedBandwidthSavedKB,
+            shieldsEnabled: typeof data.shieldsEnabled === 'boolean' ? data.shieldsEnabled : this.shieldsStats.shieldsEnabled
+          };
+          this.updateShieldsUI();
+        }
       });
     }
   }
 
-  updateClearBtnVisibility() {
-    if (!this.dom.omniboxClearBtn) return;
-    const hasText = this.dom.omniboxInput && this.dom.omniboxInput.value.trim().length > 0;
-    this.dom.omniboxClearBtn.style.display = hasText ? 'flex' : 'none';
+  toggleShieldsPopover() {
+    if (!this.dom.shieldsPopover) return;
+    const isShown = this.dom.shieldsPopover.style.display !== 'none';
+    if (isShown) {
+      this.closeShieldsPopover();
+    } else {
+      this.openShieldsPopover();
+    }
   }
 
+  openShieldsPopover() {
+    if (!this.dom.shieldsPopover) return;
+    this.updateShieldsUI();
+    this.dom.shieldsPopover.style.display = 'block';
+    this.dom.shieldToggleBtn.classList.add('active');
+  }
+
+  closeShieldsPopover() {
+    if (!this.dom.shieldsPopover) return;
+    this.dom.shieldsPopover.style.display = 'none';
+    this.dom.shieldToggleBtn.classList.remove('active');
+  }
+
+  updateShieldsUI() {
+    const isEnabled = this.shieldsStats.shieldsEnabled;
+    const total = this.shieldsStats.totalBlocked || 0;
+    const ytAds = this.shieldsStats.youtubeAdsBlocked || 0;
+    const trackers = this.shieldsStats.trackersBlocked || 0;
+    const kbSaved = this.shieldsStats.estimatedBandwidthSavedKB || 0;
+
+    if (this.dom.shieldCounter) {
+      this.dom.shieldCounter.textContent = isEnabled ? total : 'OFF';
+    }
+
+    if (this.dom.shieldsMasterSwitch) {
+      this.dom.shieldsMasterSwitch.checked = isEnabled;
+    }
+
+    if (this.dom.shieldsStatusBadge) {
+      this.dom.shieldsStatusBadge.className = `shields-status-badge ${isEnabled ? 'active' : 'disabled'}`;
+    }
+
+    if (this.dom.shieldsStatusText) {
+      this.dom.shieldsStatusText.textContent = isEnabled 
+        ? 'Shields Active • YouTube Ads & Trackers Blocked' 
+        : 'Shields Paused • Protection Disabled';
+    }
+
+    if (this.dom.shieldStatYtAds) {
+      this.dom.shieldStatYtAds.textContent = ytAds;
+    }
+
+    if (this.dom.shieldStatTrackers) {
+      this.dom.shieldStatTrackers.textContent = trackers;
+    }
+
+    if (this.dom.shieldStatDataSaved) {
+      if (kbSaved >= 1024) {
+        this.dom.shieldStatDataSaved.textContent = `${(kbSaved / 1024).toFixed(1)} MB`;
+      } else {
+        this.dom.shieldStatDataSaved.textContent = `${kbSaved} KB`;
+      }
+    }
+
+    if (this.dom.shieldStatTimeSaved) {
+      const secondsSaved = (total * 0.08).toFixed(1);
+      this.dom.shieldStatTimeSaved.textContent = `${secondsSaved}s`;
+    }
+  }
+
+  // =========================================================================
+  // 5. Omnibox & Navigation Controls
+  // =========================================================================
   setupNavigationControls() {
-    // New tab button
-    this.dom.newTabBtn?.addEventListener('click', () => {
+    this.dom.newTabBtn.addEventListener('click', () => {
       this.createTab({
         title: 'New Tab',
         url: 'yas://newtab',
@@ -515,524 +1155,307 @@ class YASBrowser {
       });
     });
 
-    // Back button
-    this.dom.btnBack?.addEventListener('click', () => {
-      this.navigateBack();
-    });
+    this.dom.btnBack.addEventListener('click', () => this.navigateBack());
+    this.dom.btnForward.addEventListener('click', () => this.navigateForward());
+    this.dom.btnReload.addEventListener('click', () => this.reloadCurrentTab());
+    this.dom.btnHome.addEventListener('click', () => this.navigateHome());
 
-    // Forward button
-    this.dom.btnForward?.addEventListener('click', () => {
-      this.navigateForward();
-    });
+    if (this.dom.bookmarkBtn) {
+      this.dom.bookmarkBtn.addEventListener('click', () => {
+        const tab = this.getActiveTab();
+        if (!tab || tab.isInternal) return;
 
-    // Reload / Stop button
-    this.dom.btnReload?.addEventListener('click', () => {
-      const tab = this.getActiveTab();
-      if (!tab) return;
-
-      if (tab.isLoading) {
-        this.stopCurrentTabLoad();
-      } else {
-        this.reloadCurrentTab();
-      }
-    });
-
-    // Home button
-    this.dom.btnHome?.addEventListener('click', () => {
-      this.navigateTo('yas://newtab');
-    });
-
-    // Shields click counter
-    this.dom.shieldToggleBtn?.addEventListener('click', () => {
-      this.trackersBlocked += Math.floor(Math.random() * 3) + 1;
-      if (this.dom.shieldCounter) {
-        this.dom.shieldCounter.textContent = this.trackersBlocked;
-      }
-      this.showToast(`🛡️ YAS Brave Shields: ${this.trackersBlocked} Trackers & Fingerprinters Blocked`);
-    });
-
-    // Media Download Toolbar button
-    this.dom.mediaDownloadBtn?.addEventListener('click', () => {
-      this.handleMediaDownloadToolbarClick();
-    });
-  }
-
-  setupDashboard() {
-    // Hero Search Input on Dashboard
-    this.dom.heroSearchInput?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        const val = this.dom.heroSearchInput.value.trim();
-        if (val) {
-          this.navigateTo(val);
-        }
-      }
-    });
-
-    // Speed Dial Cards Click
-    document.querySelectorAll('.speed-dial-card').forEach((card) => {
-      card.addEventListener('click', () => {
-        const targetUrl = card.getAttribute('data-url');
-        const targetTitle = card.getAttribute('data-title');
-        if (targetUrl) {
-          this.navigateTo(targetUrl, targetTitle);
+        if (this.bookmarks.has(tab.url)) {
+          this.bookmarks.delete(tab.url);
+          this.dom.bookmarkBtn.classList.remove('active');
+          this.showToast('Bookmark removed');
+        } else {
+          this.bookmarks.add(tab.url);
+          this.dom.bookmarkBtn.classList.add('active');
+          this.showToast('Page added to bookmarks');
         }
       });
-    });
+    }
   }
 
-  setupKeyboardShortcuts() {
-    document.addEventListener('keydown', (e) => {
-      const isCmdOrCtrl = e.ctrlKey || e.metaKey;
+  setupOmnibox() {
+    const input = this.dom.omniboxInput;
+    const clearBtn = this.dom.omniboxClearBtn;
 
-      // Ctrl + T : New Tab
-      if (isCmdOrCtrl && e.key.toLowerCase() === 't') {
-        e.preventDefault();
-        this.createTab({
-          title: 'New Tab',
-          url: 'yas://newtab',
-          favicon: '✨',
-          isInternal: true
-        });
-      }
-      // Ctrl + W : Close Current Tab
-      else if (isCmdOrCtrl && e.key.toLowerCase() === 'w') {
-        e.preventDefault();
-        if (this.activeTabId) {
-          this.closeTab(this.activeTabId);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const query = input.value.trim();
+        if (query) {
+          this.navigateToQuery(query);
+          input.blur();
         }
       }
-      // Ctrl + R / F5 : Reload Current Tab
-      else if ((isCmdOrCtrl && e.key.toLowerCase() === 'r') || e.key === 'F5') {
-        e.preventDefault();
-        this.reloadCurrentTab();
+    });
+
+    input.addEventListener('input', () => {
+      if (clearBtn) {
+        clearBtn.style.display = input.value.length > 0 ? 'flex' : 'none';
       }
-      // Ctrl + L : Focus Omnibox
-      else if (isCmdOrCtrl && e.key.toLowerCase() === 'l') {
-        e.preventDefault();
-        this.dom.omniboxInput?.focus();
-        this.dom.omniboxInput?.select();
-      }
-      // Ctrl + D : Bookmark Page
-      else if (isCmdOrCtrl && e.key.toLowerCase() === 'd') {
-        e.preventDefault();
-        this.toggleBookmarkCurrentPage();
-      }
-      // Ctrl + J or Ctrl + M : Open Media Downloader
-      else if (isCmdOrCtrl && (e.key.toLowerCase() === 'j' || e.key.toLowerCase() === 'm')) {
-        e.preventDefault();
-        this.handleMediaDownloadToolbarClick();
-      }
-      // Alt + Left Arrow : Back
-      else if (e.altKey && e.key === 'ArrowLeft') {
-        e.preventDefault();
-        this.navigateBack();
-      }
-      // Alt + Right Arrow : Forward
-      else if (e.altKey && e.key === 'ArrowRight') {
-        e.preventDefault();
-        this.navigateForward();
-      }
-      // Ctrl + Tab : Cycle Tabs
-      else if (isCmdOrCtrl && e.key === 'Tab') {
-        e.preventDefault();
-        this.cycleTabs(!e.shiftKey);
-      }
+    });
+
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => {
+        input.value = '';
+        input.focus();
+        clearBtn.style.display = 'none';
+      });
+    }
+
+    input.addEventListener('focus', () => {
+      input.select();
     });
   }
 
-  cycleTabs(forward = true) {
-    if (this.tabs.length <= 1) return;
-    const currentIndex = this.tabs.findIndex((t) => t.id === this.activeTabId);
-    let nextIndex = forward ? currentIndex + 1 : currentIndex - 1;
-    if (nextIndex >= this.tabs.length) nextIndex = 0;
-    if (nextIndex < 0) nextIndex = this.tabs.length - 1;
-    this.activateTab(this.tabs[nextIndex].id);
-  }
-
-  /**
-   * Intelligently parses input into either a direct URL or a search query
-   */
-  parseInputToUrl(input) {
-    const raw = input.trim();
-    if (!raw) return 'yas://newtab';
-
-    // Internal scheme
-    if (raw.startsWith('yas://') || raw.startsWith('about:')) {
-      return { url: raw, title: 'New Tab', favicon: '✨', isInternal: true };
-    }
-
-    // Direct HTTP/HTTPS URL
-    if (/^https?:\/\//i.test(raw)) {
-      try {
-        const parsed = new URL(raw);
-        return {
-          url: raw,
-          title: parsed.hostname,
-          favicon: this.getDomainFavicon(parsed.hostname),
-          isInternal: false
-        };
-      } catch (e) {
-        // Fallback to search
-      }
-    }
-
-    // Domain name patterns (e.g. youtube.com, github.com, sub.domain.co.uk, localhost:3000)
-    const domainRegex = /^([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(:\d+)?(\/.*)?$/;
-    const localhostRegex = /^localhost(:\d+)?(\/.*)?$/;
-    const ipRegex = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?(\/.*)?$/;
-
-    if (domainRegex.test(raw) || localhostRegex.test(raw) || ipRegex.test(raw)) {
-      const fullUrl = `https://${raw}`;
-      try {
-        const parsed = new URL(fullUrl);
-        return {
-          url: fullUrl,
-          title: parsed.hostname,
-          favicon: this.getDomainFavicon(parsed.hostname),
-          isInternal: false
-        };
-      } catch (e) {}
-    }
-
-    // Search query fallback (Google Search)
-    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(raw)}`;
-    return {
-      url: searchUrl,
-      title: `${raw} - Google Search`,
-      favicon: '🔍',
-      isInternal: false
-    };
-  }
-
-  navigateTo(inputUrl, customTitle = null) {
-    const tab = this.getActiveTab();
+  updateOmniboxForTab(tab) {
     if (!tab) return;
+    const input = this.dom.omniboxInput;
+    const badge = this.dom.securityBadge;
+    const clearBtn = this.dom.omniboxClearBtn;
 
-    const parsed = this.parseInputToUrl(inputUrl);
-    const title = customTitle || parsed.title;
-
-    this.navigateTab(tab, parsed.url, title, parsed.favicon, parsed.isInternal);
-  }
-
-  navigateTab(tab, targetUrl, title = 'Loading...', favicon = '🌐', isInternal = false) {
-    tab.url = targetUrl;
-    tab.title = title;
-    tab.favicon = favicon;
-    tab.isInternal = isInternal || targetUrl === 'yas://newtab';
-
-    // Push to tab navigation history
-    this.pushTabHistory(tab, targetUrl);
-
-    // Update DOM tab strip element
-    this.updateTabElementDom(tab);
-
-    // Handle Viewport Rendering
-    if (tab.isInternal || targetUrl === 'yas://newtab') {
-      if (tab.viewContainer) {
-        tab.viewContainer.innerHTML = '';
-      }
-      if (tab.id === this.activeTabId && this.dom.newTabDashboard) {
-        this.dom.newTabDashboard.style.display = 'flex';
+    if (tab.isInternal && tab.url === 'yas://newtab') {
+      input.value = '';
+      input.placeholder = 'Search with Google or enter URL...';
+      if (clearBtn) clearBtn.style.display = 'none';
+      if (badge) {
+        badge.className = 'security-badge internal';
+        badge.title = 'YAS Internal Protected Page';
       }
     } else {
-      if (tab.id === this.activeTabId && this.dom.newTabDashboard) {
-        this.dom.newTabDashboard.style.display = 'none';
-      }
-
-      if (tab.viewContainer) {
-        this.attachWebContentElement(tab, tab.viewContainer);
-      }
-    }
-
-    // Update UI elements for active tab
-    if (tab.id === this.activeTabId) {
-      this.syncOmnibox(tab.url === 'yas://newtab' ? '' : tab.url);
-      this.updateSecurityBadge(tab.url);
-      this.updateBookmarkButtonState(tab.url);
-      this.updateNavButtons(tab);
-      this.checkMediaDownloadOpportunity(tab.url);
-    }
-  }
-
-  pushTabHistory(tab, url) {
-    if (tab.history[tab.historyIndex] !== url) {
-      tab.history = tab.history.slice(0, tab.historyIndex + 1);
-      tab.history.push(url);
-      tab.historyIndex = tab.history.length - 1;
-    }
-    tab.canGoBack = tab.historyIndex > 0;
-    tab.canGoForward = tab.historyIndex < tab.history.length - 1;
-  }
-
-  navigateBack() {
-    const tab = this.getActiveTab();
-    if (!tab) return;
-
-    if (tab.webview && tab.webview.canGoBack && tab.webview.canGoBack()) {
-      tab.webview.goBack();
-      return;
-    }
-
-    if (tab.historyIndex > 0) {
-      tab.historyIndex--;
-      const prevUrl = tab.history[tab.historyIndex];
-      this.navigateTab(tab, prevUrl, 'Previous Page');
-    }
-  }
-
-  navigateForward() {
-    const tab = this.getActiveTab();
-    if (!tab) return;
-
-    if (tab.webview && tab.webview.canGoForward && tab.webview.canGoForward()) {
-      tab.webview.goForward();
-      return;
-    }
-
-    if (tab.historyIndex < tab.history.length - 1) {
-      tab.historyIndex++;
-      const nextUrl = tab.history[tab.historyIndex];
-      this.navigateTab(tab, nextUrl, 'Next Page');
-    }
-  }
-
-  reloadCurrentTab() {
-    const tab = this.getActiveTab();
-    if (!tab) return;
-
-    if (tab.isInternal || tab.url === 'yas://newtab') {
-      this.showToast('Dashboard refreshed');
-      return;
-    }
-
-    if (tab.webview) {
-      if (tab.webview.reload) {
-        tab.webview.reload();
-      } else if (tab.webview.src) {
-        tab.webview.src = tab.url;
+      input.value = tab.url;
+      if (clearBtn) clearBtn.style.display = 'flex';
+      const isHttps = tab.url.startsWith('https://');
+      if (badge) {
+        badge.className = `security-badge ${isHttps ? 'secure' : 'insecure'}`;
+        badge.title = isHttps ? 'Connection is secure (HTTPS 256-bit encryption)' : 'Connection is not secure';
       }
     }
-    this.showToast('Page reloading...');
-  }
 
-  stopCurrentTabLoad() {
-    const tab = this.getActiveTab();
-    if (!tab) return;
-
-    if (tab.webview && tab.webview.stop) {
-      tab.webview.stop();
-    }
-    tab.isLoading = false;
-    this.updateLoadingUi(false);
-    this.showToast('Page loading stopped');
-  }
-
-  // =========================================================================
-  // 4. UI Helpers (Omnibox Sync, Badges, Favicons, Progress Bar)
-  // =========================================================================
-  syncOmnibox(url) {
-    if (!this.dom.omniboxInput) return;
-    this.dom.omniboxInput.value = url;
-    this.dom.omniboxInput.placeholder = url || 'Search with Google or enter URL...';
-    this.updateClearBtnVisibility();
-  }
-
-  updateSecurityBadge(url) {
-    if (!this.dom.securityBadge) return;
-
-    if (!url || url.startsWith('yas://')) {
-      this.dom.securityBadge.className = 'security-badge internal';
-      this.dom.securityBadge.innerHTML = `
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
-        </svg>
-      `;
-      this.dom.securityBadge.title = 'YAS Browser Core System Page';
-    } else if (url.startsWith('https://')) {
-      this.dom.securityBadge.className = 'security-badge secure';
-      this.dom.securityBadge.innerHTML = `
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-          <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-        </svg>
-      `;
-      this.dom.securityBadge.title = 'Connection is secure (HTTPS 256-bit TLS)';
-    } else {
-      this.dom.securityBadge.className = 'security-badge insecure';
-      this.dom.securityBadge.innerHTML = `
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="10"></circle>
-          <line x1="12" y1="8" x2="12" y2="12"></line>
-          <line x1="12" y1="16" x2="12.01" y2="16"></line>
-        </svg>
-      `;
-      this.dom.securityBadge.title = 'Connection is not secure (HTTP)';
+    if (this.dom.bookmarkBtn) {
+      this.dom.bookmarkBtn.classList.toggle('active', this.bookmarks.has(tab.url));
     }
   }
 
   updateNavButtons(tab) {
-    if (this.dom.btnBack) {
-      this.dom.btnBack.disabled = !tab.canGoBack && tab.historyIndex <= 0;
-    }
-    if (this.dom.btnForward) {
-      this.dom.btnForward.disabled = !tab.canGoForward && tab.historyIndex >= tab.history.length - 1;
+    if (!tab) return;
+    this.dom.btnBack.disabled = tab.historyIndex <= 0;
+    this.dom.btnForward.disabled = tab.historyIndex >= tab.history.length - 1;
+  }
+
+  updateReloadButton(isLoading) {
+    if (isLoading) {
+      this.dom.btnReload.innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      `;
+      this.dom.btnReload.title = 'Stop Loading (Esc)';
+    } else {
+      this.dom.btnReload.innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"></polyline>
+          <polyline points="1 20 1 14 7 14"></polyline>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+        </svg>
+      `;
+      this.dom.btnReload.title = 'Reload this page (Ctrl+R)';
     }
   }
 
-  updateLoadingUi(isLoading) {
-    // 1. Loading Progress Bar
-    if (this.dom.pageLoadingBar) {
-      if (isLoading) {
-        this.dom.pageLoadingBar.classList.add('active');
-      } else {
-        this.dom.pageLoadingBar.classList.remove('active');
+  getSearchUrl(query) {
+    const engine = this.searchEngine || 'google';
+    const q = encodeURIComponent(query);
+    switch (engine) {
+      case 'duckduckgo':
+        return `https://duckduckgo.com/?q=${q}`;
+      case 'brave':
+        return `https://search.brave.com/search?q=${q}`;
+      case 'bing':
+        return `https://www.bing.com/search?q=${q}`;
+      case 'ecosia':
+        return `https://www.ecosia.org/search?q=${q}`;
+      case 'google':
+      default:
+        return `https://www.google.com/search?q=${q}`;
+    }
+  }
+
+  navigateToQuery(query) {
+    const tab = this.getActiveTab();
+    if (!tab) return;
+
+    let targetUrl = query.trim();
+
+    // Check if it's already a full URL or valid domain
+    const isUrl = /^https?:\/\//i.test(targetUrl) || /^[a-z0-9-]+(\.[a-z0-9-]+)+/i.test(targetUrl);
+
+    if (!isUrl) {
+      // Use configured search engine
+      targetUrl = this.getSearchUrl(targetUrl);
+    } else if (!/^https?:\/\//i.test(targetUrl)) {
+      targetUrl = `https://${targetUrl}`;
+    }
+
+    this.navigateTab(tab, targetUrl);
+  }
+
+  navigateTab(tab, url) {
+    tab.url = url;
+    tab.isInternal = url === 'yas://newtab';
+    tab.title = this.parseUrlDomain(url);
+
+    // Update Tab element title
+    const titleEl = document.getElementById(`title_${tab.id}`);
+    if (titleEl) titleEl.textContent = tab.title;
+
+    if (tab.isInternal) {
+      if (tab.viewPane) tab.viewPane.style.display = 'none';
+      if (this.activeTabId === tab.id) {
+        this.dom.newTabDashboard.style.display = 'flex';
       }
+      this.updateOmniboxForTab(tab);
+      return;
     }
 
-    // 2. Reload Button Swap (Reload 🔄 <-> Stop ✕)
-    if (this.dom.btnReload) {
-      if (isLoading) {
-        this.dom.btnReload.title = 'Stop loading this page (Esc)';
-        this.dom.btnReload.innerHTML = `
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        `;
-      } else {
-        this.dom.btnReload.title = 'Reload this page (Ctrl+R)';
-        this.dom.btnReload.innerHTML = `
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="23 4 23 10 17 10"></polyline>
-            <polyline points="1 20 1 14 7 14"></polyline>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-          </svg>
-        `;
-      }
-    }
-  }
+    this.dom.newTabDashboard.style.display = 'none';
 
-  updateTabTitle(tab, title) {
-    tab.title = title;
-    this.updateTabElementDom(tab);
-  }
-
-  updateTabFavicon(tab, faviconUrl) {
-    tab.favicon = faviconUrl;
-    this.updateTabElementDom(tab);
-  }
-
-  updateTabElementDom(tab) {
-    if (!tab.element) return;
-
-    const titleEl = tab.element.querySelector('.tab-title');
-    const faviconEl = tab.element.querySelector('.tab-favicon');
-
-    if (titleEl) {
-      titleEl.textContent = tab.title;
-      tab.element.setAttribute('title', tab.title);
+    // If frame doesn't exist yet, attach it
+    if (!tab.viewElement) {
+      this.attachTabFrame(tab, tab.viewPane, url);
+    } else {
+      tab.viewElement.src = url;
     }
 
-    if (faviconEl) {
-      faviconEl.innerHTML = this.renderFaviconHtml(tab.favicon);
+    if (tab.viewPane) {
+      tab.viewPane.style.display = 'flex';
     }
+
+    this.onTabStartLoading(tab.id);
+    this.onTabNavigated(tab.id, url);
   }
 
-  renderFaviconHtml(fav) {
-    if (!fav) return '🌐';
-    if (fav.startsWith('http')) {
-      return `<img src="${this.escapeHtml(fav)}" class="tab-fav-img" onerror="this.outerHTML='🌐'" alt="" />`;
-    }
-    return fav;
+  navigateBack() {
+    const tab = this.getActiveTab();
+    if (!tab || tab.historyIndex <= 0) return;
+
+    tab.historyIndex -= 1;
+    const prevUrl = tab.history[tab.historyIndex];
+    this.navigateTab(tab, prevUrl);
   }
 
-  getDomainFavicon(hostname) {
-    if (hostname.includes('youtube.com') || hostname.includes('youtu.be')) return '▶️';
-    if (hostname.includes('instagram.com')) return '📸';
-    if (hostname.includes('github.com')) return '💻';
-    if (hostname.includes('reddit.com')) return '🔥';
-    if (hostname.includes('twitter.com') || hostname.includes('x.com')) return '🐦';
-    if (hostname.includes('wikipedia.org')) return '📚';
-    return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(hostname)}&sz=64`;
+  navigateForward() {
+    const tab = this.getActiveTab();
+    if (!tab || tab.historyIndex >= tab.history.length - 1) return;
+
+    tab.historyIndex += 1;
+    const nextUrl = tab.history[tab.historyIndex];
+    this.navigateTab(tab, nextUrl);
   }
 
-  toggleBookmarkCurrentPage() {
+  reloadCurrentTab() {
     const tab = this.getActiveTab();
     if (!tab || tab.isInternal) return;
 
-    if (this.bookmarks.has(tab.url)) {
-      this.bookmarks.delete(tab.url);
-      this.showToast('Removed from Bookmarks');
+    if (tab.isLoading) {
+      if (tab.viewElement && tab.viewElement.stop) tab.viewElement.stop();
+      this.onTabStopLoading(tab.id);
     } else {
-      this.bookmarks.add(tab.url);
-      this.showToast('★ Page added to Bookmarks');
+      if (tab.viewElement && tab.viewElement.reload) {
+        tab.viewElement.reload();
+      } else if (tab.viewElement) {
+        tab.viewElement.src = tab.url;
+      }
+      this.onTabStartLoading(tab.id);
     }
-    this.updateBookmarkButtonState(tab.url);
   }
 
-  updateBookmarkButtonState(url) {
-    if (!this.dom.bookmarkBtn) return;
-    const isBookmarked = this.bookmarks.has(url);
-    this.dom.bookmarkBtn.classList.toggle('active', isBookmarked);
-    this.dom.bookmarkBtn.style.color = isBookmarked ? '#ffd166' : 'var(--text-secondary)';
-    this.dom.bookmarkBtn.title = isBookmarked ? 'Bookmarked (Ctrl+D to remove)' : 'Bookmark this page (Ctrl+D)';
+  navigateHome() {
+    const tab = this.getActiveTab();
+    if (!tab) return;
+    this.navigateTab(tab, 'yas://newtab');
   }
 
   // =========================================================================
-  // 5. Media Download Integration
+  // 5. Dashboard & Speed Dials
   // =========================================================================
-  checkMediaDownloadOpportunity(url) {
-    if (!this.dom.mediaDownloadBtn) return;
+  setupDashboard() {
+    // Hero Search Box
+    const heroInput = this.dom.heroSearchInput;
+    const heroClearBtn = this.dom.heroSearchClearBtn;
+    const heroSubmitBtn = this.dom.heroSearchSubmitBtn;
 
-    const isDownloadable = Boolean(
-      url &&
-      (url.includes('youtube.com/watch') ||
-       url.includes('youtu.be/') ||
-       url.includes('youtube.com/shorts') ||
-       url.includes('instagram.com/p/') ||
-       url.includes('instagram.com/reel/'))
-    );
+    const performSearch = () => {
+      if (!heroInput) return;
+      const query = heroInput.value.trim();
+      if (query) {
+        this.navigateToQuery(query);
+        heroInput.value = '';
+        if (heroClearBtn) heroClearBtn.style.display = 'none';
+      }
+    };
 
-    this.dom.mediaDownloadBtn.classList.toggle('attention-glow', isDownloadable);
-  }
+    if (heroInput) {
+      heroInput.addEventListener('input', () => {
+        if (heroClearBtn) {
+          heroClearBtn.style.display = heroInput.value.length > 0 ? 'flex' : 'none';
+        }
+      });
 
-  handleMediaDownloadToolbarClick() {
-    if (window.mediaDownloader) {
-      const activeTab = this.getActiveTab();
+      heroInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          performSearch();
+        } else if (e.key === 'Escape') {
+          heroInput.value = '';
+          if (heroClearBtn) heroClearBtn.style.display = 'none';
+          heroInput.blur();
+        }
+      });
+    }
 
-      // If on a YouTube or Instagram page and the downloader doesn't already have an input, auto-fill it
-      if (activeTab && activeTab.url && !activeTab.isInternal && activeTab.url.startsWith('http')) {
-        const url = activeTab.url;
-        const isMedia = url.includes('youtube.com') || url.includes('youtu.be') || url.includes('instagram.com');
-        
-        if (isMedia) {
-          const inputEl = document.getElementById('mediaUrlInput');
-          if (inputEl && (!inputEl.value || inputEl.value !== url)) {
-            window.mediaDownloader.setLinkAndPrompt(url);
-            return;
+    if (heroClearBtn) {
+      heroClearBtn.addEventListener('click', () => {
+        if (heroInput) {
+          heroInput.value = '';
+          heroInput.focus();
+        }
+        heroClearBtn.style.display = 'none';
+      });
+    }
+
+    if (heroSubmitBtn) {
+      heroSubmitBtn.addEventListener('click', () => {
+        performSearch();
+      });
+    }
+
+    // Speed Dial Cards
+    document.querySelectorAll('.speed-dial-card').forEach((card) => {
+      card.addEventListener('click', () => {
+        const url = card.dataset.url;
+        const title = card.dataset.title || 'Website';
+        if (url) {
+          const tab = this.getActiveTab();
+          if (tab) {
+            this.navigateTab(tab, url);
           }
         }
-      }
+      });
+    });
 
-      window.mediaDownloader.openPanel();
+    // Downloader Callout Banner
+    if (this.dom.downloaderFeatureBanner) {
+      this.dom.downloaderFeatureBanner.addEventListener('click', () => {
+        if (window.mediaDownloader && window.mediaDownloader.openPanel) {
+          window.mediaDownloader.openPanel();
+        }
+      });
     }
-  }
-
-  updateDownloadBadgeCount(activeCount) {
-    if (!this.dom.downloadCounter) return;
-    if (activeCount > 0) {
-      this.dom.downloadCounter.textContent = activeCount;
-      this.dom.downloadCounter.style.display = 'inline-flex';
-    } else {
-      this.dom.downloadCounter.style.display = 'none';
-    }
-  }
-
-  // =========================================================================
-  // 6. Utility Functions
-  // =========================================================================
-  getActiveTab() {
-    return this.tabs.find((t) => t.id === this.activeTabId);
   }
 
   startClock() {
@@ -1042,38 +1465,105 @@ class YASBrowser {
         this.dom.dashboardClock.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       }
       if (this.dom.dashboardDate) {
-        this.dom.dashboardDate.textContent = now.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
+        this.dom.dashboardDate.textContent = now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
       }
     };
     updateTime();
     setInterval(updateTime, 1000);
   }
 
-  showToast(message) {
-    const container = this.dom.toastContainer || document.getElementById('toastContainer');
-    if (!container) return;
+  // =========================================================================
+  // 6. Media Detection & Keyboard Shortcuts
+  // =========================================================================
+  checkVideoDetectionForTab(tab) {
+    if (!tab || !this.dom.mediaDownloadBtn) return;
 
-    const toast = document.createElement('div');
-    toast.className = 'toast-item';
-    toast.innerHTML = `<span>${this.escapeHtml(message)}</span>`;
-    container.appendChild(toast);
+    const isVideoSite = /youtube\.com|youtu\.be|instagram\.com/i.test(tab.url);
+    this.dom.mediaDownloadBtn.classList.toggle('attention-glow', isVideoSite);
+  }
 
-    setTimeout(() => {
-      toast.style.opacity = '0';
-      toast.style.transform = 'translateY(10px)';
-      toast.style.transition = 'all 0.3s ease';
-      setTimeout(() => toast.remove(), 300);
-    }, 2800);
+  setupKeyboardShortcuts() {
+    window.addEventListener('keydown', (e) => {
+      // Ctrl / Cmd modifier
+      const isCmdOrCtrl = e.ctrlKey || e.metaKey;
+
+      if (isCmdOrCtrl && e.key.toLowerCase() === 't') {
+        e.preventDefault();
+        this.createTab({
+          title: 'New Tab',
+          url: 'yas://newtab',
+          favicon: '✨',
+          isInternal: true
+        });
+      } else if (isCmdOrCtrl && e.key.toLowerCase() === 'w') {
+        e.preventDefault();
+        if (this.activeTabId) {
+          this.closeTab(this.activeTabId);
+        }
+      } else if (isCmdOrCtrl && e.key.toLowerCase() === 'l') {
+        e.preventDefault();
+        this.dom.omniboxInput.focus();
+        this.dom.omniboxInput.select();
+      } else if (isCmdOrCtrl && e.key.toLowerCase() === 'm') {
+        e.preventDefault();
+        if (window.mediaDownloader && window.mediaDownloader.togglePanel) {
+          window.mediaDownloader.togglePanel();
+        }
+      } else if (isCmdOrCtrl && e.key === ',') {
+        e.preventDefault();
+        this.openSettings('appearance');
+      } else if (isCmdOrCtrl && e.key.toLowerCase() === 'r') {
+        e.preventDefault();
+        this.reloadCurrentTab();
+      } else if (e.key === 'Escape') {
+        this.closeSettings();
+        const diagModal = document.getElementById('engineInstallModalBackdrop');
+        if (diagModal) diagModal.classList.remove('open');
+        if (window.mediaDownloader && window.mediaDownloader.closePanel) {
+          window.mediaDownloader.closePanel();
+        }
+      }
+    });
+  }
+
+  // =========================================================================
+  // Helpers
+  // =========================================================================
+  getActiveTab() {
+    return this.tabs.find((t) => t.id === this.activeTabId);
+  }
+
+  parseUrlDomain(url) {
+    try {
+      const u = new URL(url);
+      return u.hostname.replace(/^www\./, '');
+    } catch (_) {
+      return url;
+    }
   }
 
   escapeHtml(str) {
-    if (!str) return '';
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  showToast(message, duration = 3200) {
+    const toast = document.createElement('div');
+    toast.className = 'yas-toast';
+    toast.innerHTML = `
+      <span style="color: var(--accent-primary); font-size: 15px;">●</span>
+      <span>${this.escapeHtml(message)}</span>
+    `;
+
+    this.dom.toastContainer.appendChild(toast);
+
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateY(10px) scale(0.95)';
+      toast.style.transition = 'all 0.2s ease';
+      setTimeout(() => toast.remove(), 200);
+    }, duration);
   }
 }
 

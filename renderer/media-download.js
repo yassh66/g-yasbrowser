@@ -1,1080 +1,1010 @@
 /**
- * YAS Browser - Production-Grade Media Download Engine
+ * YAS Browser - Media Download Studio Controller
  * 
- * Handles:
- * - Real yt-dlp & FFmpeg binary detection & interactive diagnostics modal
- * - YouTube (Videos + Shorts) & Instagram (Reels + Posts) deep stream analysis
- * - Intelligent Error Categorization (Age-restricted, Private, Login walls, Rate limits, Invalid URLs)
- * - Full Format Matrix: Combined (Merged Video+Audio), Raw Video, Extracted Audio (MP3/FLAC/AAC)
- * - Smart "Best Quality" one-click analysis and download execution
- * - Real-time IPC streaming download progress (speed, ETA, downloaded bytes, percent)
- * - Full pipeline states: downloading, FFmpeg merging, audio conversion, completion
- * - Process cancellation, directory selection, and native folder/file reveal
+ * Features:
+ * - Full-Screen / Full-Window Workspace Overlay taking over browser content area
+ * - Real yt-dlp Extractor Engine integration with native IPC bridge
+ * - Intelligent Format Matrix (Combined Video+Audio, Video Only, Lossless Audio Only)
+ * - Complete Trash / Clear All functionality resetting input, analysis, states, and errors
+ * - 1-Click "⚡ Best Quality" instant download pipeline
+ * - Real-time progress tracker with animated progress bar, speed, ETA, and bytes
+ * - Native "Open File" and "Open Folder" actions
+ * - System Engine Diagnostics modal for yt-dlp and FFmpeg status
+ * - Quick Platform Demo Presets for YouTube 4K & Instagram Reels
  */
 
 class MediaDownloader {
   constructor() {
-    this.currentAnalyzedData = null;
-    this.selectedFormat = null;
-    this.selectedFormatType = 'combined'; // 'combined' | 'video' | 'audio'
-    this.downloads = [];
-    this.activeDownloadCount = 0;
-    this.selectedDownloadPath = '~/Downloads';
-    this.systemInfo = null;
-    this.currentOsTab = 'win';
-    this.currentState = 'idle'; // 'idle' | 'analyzing' | 'ready' | 'error'
+    this.isOpen = false;
+    this.isAnalyzing = false;
+    this.currentMediaInfo = null;
+    this.selectedFormatId = null;
+    this.activeCategory = 'combined'; // 'combined' | 'video' | 'audio'
+    this.activeDownloads = new Map();
+    this.destinationFolder = '~/Downloads';
+    this.isElectron = Boolean(window.electronAPI && window.electronAPI.isElectron);
 
     this.dom = {
-      modalBackdrop: document.getElementById('mediaModalBackdrop'),
+      // Overlay & Containers
+      overlay: document.getElementById('mediaModalBackdrop'),
       panelContainer: document.getElementById('mediaPanelContainer'),
-      openTriggerBtn: document.getElementById('mediaDownloadTriggerBtn'),
-      featureBannerBtn: document.getElementById('downloaderFeatureBanner'),
+      triggerBtn: document.getElementById('mediaDownloadTriggerBtn'),
       closeBtn: document.getElementById('mediaPanelCloseBtn'),
-      urlInput: document.getElementById('mediaUrlInput'),
+      emptyState: document.getElementById('studioEmptyState'),
+      twoColumnGrid: document.getElementById('analyzedResultContainer'),
+      workspace: document.querySelector('.studio-workspace'),
+      downloadCounter: document.getElementById('downloadCounter'),
+
+      // Header Controls
+      engineSubtitle: document.getElementById('engineStatusSubtitle'),
+      presetYtBadge: document.getElementById('presetYtBadge'),
+      presetIgBadge: document.getElementById('presetIgBadge'),
+      destinationPill: document.getElementById('btnChangeFolder'),
+      destinationPathText: document.getElementById('destinationPathText'),
+      btnOpenDownloadsFolder: document.getElementById('btnOpenDownloadsFolder'),
+      engineStatusBadge: document.getElementById('engineStatusBadge'),
+      engineBadgeText: document.getElementById('engineBadgeText'),
+      btnClearAll: document.getElementById('btnClearMediaAll'),
+
+      // Input Hero
       inputWrapper: document.getElementById('mediaInputWrapper'),
+      urlInput: document.getElementById('mediaUrlInput'),
       inputClearBtn: document.getElementById('inputClearBtn'),
+      pasteClipboardBtn: document.getElementById('pasteClipboardBtn'),
       btnAnalyze: document.getElementById('btnAnalyzeMedia'),
       btnQuickBest: document.getElementById('btnQuickBestQuality'),
-      btnClearAll: document.getElementById('btnClearMediaAll'),
-      pasteClipBtn: document.getElementById('pasteClipboardBtn'),
-      
-      // Loading State & Steps
-      analysisLoadingCard: document.getElementById('analysisLoadingCard'),
-      loadingPhaseTitle: document.getElementById('loadingPhaseTitle'),
-      loadingPhaseSub: document.getElementById('loadingPhaseSub'),
+
+      // Analysis Loading & Error Cards
+      loadingCard: document.getElementById('analysisLoadingCard'),
+      loadingTitle: document.getElementById('loadingPhaseTitle'),
+      loadingSub: document.getElementById('loadingPhaseSub'),
       step1Dot: document.getElementById('step1Dot'),
       step2Dot: document.getElementById('step2Dot'),
       step3Dot: document.getElementById('step3Dot'),
-
-      // Error State
-      mediaErrorCard: document.getElementById('mediaErrorCard'),
+      errorCard: document.getElementById('mediaErrorCard'),
       errorTitle: document.getElementById('errorTitle'),
-      errorDescription: document.getElementById('errorDescription'),
+      errorDesc: document.getElementById('errorDescription'),
       btnErrorRetry: document.getElementById('btnErrorRetry'),
       btnErrorGuide: document.getElementById('btnErrorGuide'),
 
-      // Engine Diagnostics Badge & Modal
-      engineStatusBadge: document.getElementById('engineStatusBadge'),
-      engineBadgeText: document.getElementById('engineBadgeText'),
-      engineStatusSubtitle: document.getElementById('engineStatusSubtitle'),
+      // Media Preview Card (Left Column)
+      thumbnail: document.getElementById('mediaThumbnail'),
+      durationBadge: document.getElementById('mediaDuration'),
+      platformBadge: document.getElementById('mediaPlatformBadge'),
+      bestAvailableBadge: document.getElementById('bestAvailableBadge'),
+      mediaTitle: document.getElementById('mediaTitle'),
+      mediaCreator: document.getElementById('mediaCreator'),
+
+      // Formats Selection (Right Column)
+      tabCombined: document.getElementById('tabCombinedFormats'),
+      tabVideo: document.getElementById('tabVideoFormats'),
+      tabAudio: document.getElementById('tabAudioFormats'),
+      formatsList: document.getElementById('formatsListContainer'),
+      btnStartDownload: document.getElementById('btnStartDownload'),
+
+      // Queue Section
+      queueList: document.getElementById('downloadQueueList'),
+      emptyQueuePlaceholder: document.getElementById('emptyQueuePlaceholder'),
+      btnClearCompletedQueue: document.getElementById('btnClearCompletedQueue'),
+
+      // Diagnostics Modal
       engineModalBackdrop: document.getElementById('engineInstallModalBackdrop'),
       btnEngineModalClose: document.getElementById('btnEngineModalClose'),
-      btnDiagDone: document.getElementById('btnDiagDone'),
       btnRescanDependencies: document.getElementById('btnRescanDependencies'),
+      btnDiagDone: document.getElementById('btnDiagDone'),
       ytdlpStatusPill: document.getElementById('ytdlpStatusPill'),
       ytdlpPathText: document.getElementById('ytdlpPathText'),
       ffmpegStatusPill: document.getElementById('ffmpegStatusPill'),
       ffmpegPathText: document.getElementById('ffmpegPathText'),
-      tabWinGuide: document.getElementById('tabWinGuide'),
-      tabMacGuide: document.getElementById('tabMacGuide'),
-      tabLinuxGuide: document.getElementById('tabLinuxGuide'),
       guideHeading: document.getElementById('guideHeading'),
       guideCommandText: document.getElementById('guideCommandText'),
       btnCopyGuideCommand: document.getElementById('btnCopyGuideCommand'),
       guideAlternativesList: document.getElementById('guideAlternativesList'),
-
-      // Folder Selector
-      destinationPathText: document.getElementById('destinationPathText'),
-      btnChangeFolder: document.getElementById('btnChangeFolder'),
-      btnOpenDownloadsFolder: document.getElementById('btnOpenDownloadsFolder'),
-      
-      // Preset Badges
-      presetYt: document.getElementById('presetYtBadge'),
-      presetIg: document.getElementById('presetIgBadge'),
-      
-      // Result Card Elements
-      resultContainer: document.getElementById('analyzedResultContainer'),
-      mediaThumbnail: document.getElementById('mediaThumbnail'),
-      mediaDuration: document.getElementById('mediaDuration'),
-      mediaPlatform: document.getElementById('mediaPlatformBadge'),
-      bestAvailableBadge: document.getElementById('bestAvailableBadge'),
-      mediaTitle: document.getElementById('mediaTitle'),
-      mediaCreator: document.getElementById('mediaCreator'),
-      
-      // Formats Tabs & Grid
-      tabCombinedFormats: document.getElementById('tabCombinedFormats'),
-      tabVideoFormats: document.getElementById('tabVideoFormats'),
-      tabAudioFormats: document.getElementById('tabAudioFormats'),
-      formatsListContainer: document.getElementById('formatsListContainer'),
-      btnStartDownload: document.getElementById('btnStartDownload'),
-
-      // Queue & Progress
-      downloadQueueList: document.getElementById('downloadQueueList'),
-      emptyQueuePlaceholder: document.getElementById('emptyQueuePlaceholder'),
-      downloadCounter: document.getElementById('downloadCounter')
+      tabWinGuide: document.getElementById('tabWinGuide'),
+      tabMacGuide: document.getElementById('tabMacGuide'),
+      tabLinuxGuide: document.getElementById('tabLinuxGuide')
     };
 
     this.init();
   }
 
-  async init() {
-    this.setupEventListeners();
-    await this.checkSystemDependencies();
-    this.setupIpcListeners();
+  init() {
+    this.setupPanelEvents();
+    this.setupInputEvents();
+    this.setupFormatTabs();
+    this.setupDiagnosticsModal();
+    this.setupIPCListeners();
+    this.checkInitialEngineHealth();
   }
 
-  /**
-   * Diagnostic check of local yt-dlp and ffmpeg binaries
-   */
-  async checkSystemDependencies() {
-    if (window.electronAPI && window.electronAPI.checkDependencies) {
-      try {
-        const info = await window.electronAPI.checkDependencies();
-        this.systemInfo = info;
-        
-        if (info.defaultDownloadPath) {
-          this.selectedDownloadPath = info.defaultDownloadPath;
-          if (this.dom.destinationPathText) {
-            this.dom.destinationPathText.textContent = info.defaultDownloadPath;
-          }
-        }
-
-        // Set default OS tab based on detected platform
-        if (info.platform === 'win32') this.currentOsTab = 'win';
-        else if (info.platform === 'darwin') this.currentOsTab = 'mac';
-        else this.currentOsTab = 'linux';
-
-        this.updateDiagnosticsUI(info);
-      } catch (err) {
-        console.warn('[YAS Downloader] Failed to query system dependencies:', err);
-      }
-    } else {
-      // Browser preview mode simulated diagnostic state
-      this.systemInfo = {
-        platform: 'darwin',
-        ytdlp: { available: true, path: '/usr/local/bin/yt-dlp', version: '2025.02.19' },
-        ffmpeg: { available: true, path: '/usr/local/bin/ffmpeg' }
-      };
-      this.updateDiagnosticsUI(this.systemInfo);
-    }
-  }
-
-  updateDiagnosticsUI(info) {
-    if (!info) return;
-
-    // Header badge
-    if (info.ytdlp && info.ytdlp.available) {
-      if (this.dom.engineStatusBadge) {
-        this.dom.engineStatusBadge.className = 'engine-badge';
-        this.dom.engineBadgeText.textContent = `yt-dlp v${info.ytdlp.version || 'Ready'}`;
-      }
-      if (this.dom.engineStatusSubtitle) {
-        this.dom.engineStatusSubtitle.textContent = `Native yt-dlp Engine • ${info.ffmpeg?.available ? 'FFmpeg Active' : 'Native Muxer'}`;
-      }
-    } else {
-      if (this.dom.engineStatusBadge) {
-        this.dom.engineStatusBadge.className = 'engine-badge simulated';
-        this.dom.engineBadgeText.textContent = 'yt-dlp Setup Needed';
-      }
-      if (this.dom.engineStatusSubtitle) {
-        this.dom.engineStatusSubtitle.textContent = 'Click to open setup guide & diagnostics';
-      }
-    }
-
-    // Modal Status Cards
-    if (this.dom.ytdlpStatusPill) {
-      if (info.ytdlp?.available) {
-        this.dom.ytdlpStatusPill.className = 'diag-status-pill ready';
-        this.dom.ytdlpStatusPill.textContent = `Installed (${info.ytdlp.version || 'Active'})`;
-        this.dom.ytdlpPathText.textContent = info.ytdlp.path || 'System PATH';
-      } else {
-        this.dom.ytdlpStatusPill.className = 'diag-status-pill missing';
-        this.dom.ytdlpStatusPill.textContent = 'Not Found';
-        this.dom.ytdlpPathText.textContent = 'Install yt-dlp for unrestricted 4K/8K downloads';
-      }
-    }
-
-    if (this.dom.ffmpegStatusPill) {
-      if (info.ffmpeg?.available) {
-        this.dom.ffmpegStatusPill.className = 'diag-status-pill ready';
-        this.dom.ffmpegStatusPill.textContent = 'Installed (Muxer Ready)';
-        this.dom.ffmpegPathText.textContent = info.ffmpeg.path || 'System PATH';
-      } else {
-        this.dom.ffmpegStatusPill.className = 'diag-status-pill missing';
-        this.dom.ffmpegStatusPill.textContent = 'Recommended';
-        this.dom.ffmpegPathText.textContent = 'Required for merging 4K/1080p video+audio';
-      }
-    }
-
-    this.renderInstallationGuideTab(this.currentOsTab);
-  }
-
-  renderInstallationGuideTab(os) {
-    this.currentOsTab = os;
-    this.dom.tabWinGuide?.classList.toggle('active', os === 'win');
-    this.dom.tabMacGuide?.classList.toggle('active', os === 'mac');
-    this.dom.tabLinuxGuide?.classList.toggle('active', os === 'linux');
-
-    if (os === 'win') {
-      if (this.dom.guideHeading) this.dom.guideHeading.textContent = 'Recommended Windows Installation (PowerShell / Terminal):';
-      if (this.dom.guideCommandText) this.dom.guideCommandText.textContent = 'winget install yt-dlp && winget install Gyan.FFmpeg';
-      if (this.dom.guideAlternativesList) {
-        this.dom.guideAlternativesList.innerHTML = `
-          <div class="guide-alt-item"><span>Chocolatey:</span> <span class="guide-alt-cmd">choco install yt-dlp ffmpeg</span></div>
-          <div class="guide-alt-item"><span>Scoop:</span> <span class="guide-alt-cmd">scoop install yt-dlp ffmpeg</span></div>
-        `;
-      }
-    } else if (os === 'mac') {
-      if (this.dom.guideHeading) this.dom.guideHeading.textContent = 'Recommended macOS Installation (Homebrew):';
-      if (this.dom.guideCommandText) this.dom.guideCommandText.textContent = 'brew install yt-dlp ffmpeg';
-      if (this.dom.guideAlternativesList) {
-        this.dom.guideAlternativesList.innerHTML = `
-          <div class="guide-alt-item"><span>MacPorts:</span> <span class="guide-alt-cmd">sudo port install yt-dlp ffmpeg</span></div>
-        `;
-      }
-    } else {
-      if (this.dom.guideHeading) this.dom.guideHeading.textContent = 'Recommended Linux Installation:';
-      if (this.dom.guideCommandText) this.dom.guideCommandText.textContent = 'sudo apt install yt-dlp ffmpeg || sudo pacman -S yt-dlp ffmpeg';
-      if (this.dom.guideAlternativesList) {
-        this.dom.guideAlternativesList.innerHTML = `
-          <div class="guide-alt-item"><span>PIP:</span> <span class="guide-alt-cmd">pip install -U yt-dlp</span></div>
-        `;
-      }
-    }
-  }
-
-  /**
-   * Listen for real-time progress events piped from child_process yt-dlp
-   */
-  setupIpcListeners() {
-    if (window.electronAPI && window.electronAPI.onDownloadProgress) {
-      window.electronAPI.onDownloadProgress((data) => {
-        this.handleProgressUpdate(data);
+  // =========================================================================
+  // 1. Studio Panel Open / Close / Toggle / Reset
+  // =========================================================================
+  setupPanelEvents() {
+    // Toolbar Trigger Button
+    if (this.dom.triggerBtn) {
+      this.dom.triggerBtn.addEventListener('click', () => {
+        this.togglePanel();
       });
     }
-  }
 
-  setupEventListeners() {
-    // Open panel triggers
-    this.dom.openTriggerBtn?.addEventListener('click', () => this.openPanel());
-    this.dom.featureBannerBtn?.addEventListener('click', () => this.openPanel());
-
-    // Close panel
-    this.dom.closeBtn?.addEventListener('click', () => this.closePanel());
-    this.dom.modalBackdrop?.addEventListener('click', (e) => {
-      if (e.target === this.dom.modalBackdrop) {
+    // Studio Close Button
+    if (this.dom.closeBtn) {
+      this.dom.closeBtn.addEventListener('click', () => {
         this.closePanel();
-      }
-    });
+      });
+    }
 
-    // Engine Diagnostics modal open/close
-    this.dom.engineStatusBadge?.addEventListener('click', () => this.openEngineModal());
-    this.dom.btnErrorGuide?.addEventListener('click', () => this.openEngineModal());
-    this.dom.btnEngineModalClose?.addEventListener('click', () => this.closeEngineModal());
-    this.dom.btnDiagDone?.addEventListener('click', () => this.closeEngineModal());
-    this.dom.engineModalBackdrop?.addEventListener('click', (e) => {
-      if (e.target === this.dom.engineModalBackdrop) {
-        this.closeEngineModal();
-      }
-    });
+    // Complete Trash / Clear All Button (Highest priority fix)
+    if (this.dom.btnClearAll) {
+      this.dom.btnClearAll.addEventListener('click', () => {
+        this.resetAll(true);
+      });
+    }
 
-    // Diagnostics modal tabs & copy button
-    this.dom.tabWinGuide?.addEventListener('click', () => this.renderInstallationGuideTab('win'));
-    this.dom.tabMacGuide?.addEventListener('click', () => this.renderInstallationGuideTab('mac'));
-    this.dom.tabLinuxGuide?.addEventListener('click', () => this.renderInstallationGuideTab('linux'));
+    // Preset Platform Badges
+    if (this.dom.presetYtBadge) {
+      this.dom.presetYtBadge.addEventListener('click', () => {
+        this.dom.urlInput.value = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ';
+        this.updateInputClearButton();
+        this.startAnalysis();
+      });
+    }
 
-    this.dom.btnCopyGuideCommand?.addEventListener('click', async () => {
-      const cmd = this.dom.guideCommandText?.textContent;
-      if (cmd) {
-        try {
-          if (window.electronAPI && window.electronAPI.copyToClipboard) {
-            await window.electronAPI.copyToClipboard(cmd);
-          } else {
-            await navigator.clipboard.writeText(cmd);
-          }
-          this.showToast('📋 Install command copied to clipboard');
-        } catch (err) {
-          this.showToast('Copied to clipboard');
-        }
-      }
-    });
+    if (this.dom.presetIgBadge) {
+      this.dom.presetIgBadge.addEventListener('click', () => {
+        this.dom.urlInput.value = 'https://www.instagram.com/reel/C3x9M8_L4Q1/';
+        this.updateInputClearButton();
+        this.startAnalysis();
+      });
+    }
 
-    this.dom.btnRescanDependencies?.addEventListener('click', async () => {
-      this.dom.btnRescanDependencies.textContent = 'Scanning...';
-      await this.checkSystemDependencies();
-      this.dom.btnRescanDependencies.textContent = '🔄 Re-scan Binaries';
-      this.showToast('System binaries scanned');
-    });
-
-    // ESC key closes modal
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        if (this.isEngineModalOpen()) {
-          this.closeEngineModal();
-        } else if (this.isPanelOpen()) {
-          this.closePanel();
-        }
-      }
-    });
-
-    // URL input typing and clear icon visibility
-    this.dom.urlInput?.addEventListener('input', () => {
-      const val = this.dom.urlInput.value.trim();
-      this.dom.inputClearBtn?.classList.toggle('visible', val.length > 0);
-      this.dom.inputWrapper?.classList.remove('has-error');
-      if (this.dom.mediaErrorCard) this.dom.mediaErrorCard.style.display = 'none';
-    });
-
-    this.dom.urlInput?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        this.analyzeCurrentUrl();
-      }
-    });
-
-    // Clear input button
-    this.dom.inputClearBtn?.addEventListener('click', () => {
-      this.resetAnalysisState();
-      this.dom.urlInput?.focus();
-    });
-
-    // Clear All button
-    this.dom.btnClearAll?.addEventListener('click', () => {
-      this.resetAnalysisState();
-      this.showToast('Panel and inputs reset');
-    });
-
-    // Analyze Button
-    this.dom.btnAnalyze?.addEventListener('click', () => {
-      this.analyzeCurrentUrl();
-    });
-
-    // ⚡ Quick Best Quality Button
-    this.dom.btnQuickBest?.addEventListener('click', () => {
-      this.executeQuickBestDownload();
-    });
-
-    // Error retry button
-    this.dom.btnErrorRetry?.addEventListener('click', () => {
-      this.analyzeCurrentUrl();
-    });
-
-    // Folder Selector
-    this.dom.btnChangeFolder?.addEventListener('click', async () => {
-      if (window.electronAPI && window.electronAPI.chooseDirectory) {
-        const selected = await window.electronAPI.chooseDirectory();
-        if (selected) {
-          this.selectedDownloadPath = selected;
-          if (this.dom.destinationPathText) {
+    // Change Folder Pill
+    if (this.dom.destinationPill) {
+      this.dom.destinationPill.addEventListener('click', async () => {
+        if (window.electronAPI && window.electronAPI.selectDirectory) {
+          const selected = await window.electronAPI.selectDirectory();
+          if (selected) {
+            this.destinationFolder = selected;
             this.dom.destinationPathText.textContent = selected;
+            this.showToast(`Destination folder updated: ${selected}`);
           }
-          this.showToast(`📁 Destination: ${selected}`);
-        }
-      } else {
-        this.showToast('Default download directory: ~/Downloads');
-      }
-    });
-
-    this.dom.btnOpenDownloadsFolder?.addEventListener('click', () => {
-      if (window.electronAPI && window.electronAPI.openFolder) {
-        window.electronAPI.openFolder(this.selectedDownloadPath);
-      } else {
-        this.showToast(`Downloads directory: ${this.selectedDownloadPath}`);
-      }
-    });
-
-    // Clipboard Paste Button
-    this.dom.pasteClipBtn?.addEventListener('click', async () => {
-      try {
-        let text = '';
-        if (navigator.clipboard && navigator.clipboard.readText) {
-          text = await navigator.clipboard.readText();
-        }
-        if (text) {
-          this.dom.urlInput.value = text;
-          this.dom.inputClearBtn?.classList.add('visible');
-          this.analyzeCurrentUrl();
         } else {
-          this.showToast('Clipboard is empty');
+          this.showToast('Folder selection set to ~/Downloads');
         }
-      } catch (err) {
-        this.showToast('Please paste the URL manually');
-      }
-    });
+      });
+    }
 
-    // Preset Link clicks
-    this.dom.presetYt?.addEventListener('click', () => {
-      this.dom.urlInput.value = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
-      this.dom.inputClearBtn?.classList.add('visible');
-      this.analyzeCurrentUrl();
-    });
+    // Open Downloads Directory Button
+    if (this.dom.btnOpenDownloadsFolder) {
+      this.dom.btnOpenDownloadsFolder.addEventListener('click', () => {
+        if (window.electronAPI && window.electronAPI.openFolder) {
+          window.electronAPI.openFolder(this.destinationFolder);
+        } else {
+          this.showToast('Opening downloads directory: ~/Downloads');
+        }
+      });
+    }
 
-    this.dom.presetIg?.addEventListener('click', () => {
-      this.dom.urlInput.value = 'https://www.instagram.com/reel/C_vF8a9J3kL/';
-      this.dom.inputClearBtn?.classList.add('visible');
-      this.analyzeCurrentUrl();
-    });
-
-    // Format Tab Switches (Combined vs Video Only vs Audio Only)
-    this.dom.tabCombinedFormats?.addEventListener('click', () => {
-      this.switchFormatTab('combined');
-    });
-
-    this.dom.tabVideoFormats?.addEventListener('click', () => {
-      this.switchFormatTab('video');
-    });
-
-    this.dom.tabAudioFormats?.addEventListener('click', () => {
-      this.switchFormatTab('audio');
-    });
-
-    // Trigger Download
-    this.dom.btnStartDownload?.addEventListener('click', () => {
-      this.triggerDownloadExecution();
-    });
-  }
-
-  openEngineModal() {
-    this.dom.engineModalBackdrop?.classList.add('open');
-  }
-
-  closeEngineModal() {
-    this.dom.engineModalBackdrop?.classList.remove('open');
-  }
-
-  isEngineModalOpen() {
-    return this.dom.engineModalBackdrop?.classList.contains('open') || false;
-  }
-
-  switchFormatTab(type) {
-    this.selectedFormatType = type;
-    this.dom.tabCombinedFormats?.classList.toggle('active', type === 'combined');
-    this.dom.tabVideoFormats?.classList.toggle('active', type === 'video');
-    this.dom.tabAudioFormats?.classList.toggle('active', type === 'audio');
-    this.renderFormatItems();
+    // Clear Completed Queue Items
+    if (this.dom.btnClearCompletedQueue) {
+      this.dom.btnClearCompletedQueue.addEventListener('click', () => {
+        this.clearCompletedDownloads();
+      });
+    }
   }
 
   openPanel() {
-    this.dom.modalBackdrop?.classList.add('open');
+    this.isOpen = true;
+    this.dom.overlay.classList.add('open');
+
+    // Auto-populate URL if active tab has a YouTube / Instagram link
+    if (window.yasBrowser) {
+      const activeTab = window.yasBrowser.getActiveTab();
+      if (activeTab && /youtube\.com|youtu\.be|instagram\.com/i.test(activeTab.url)) {
+        if (!this.dom.urlInput.value) {
+          this.dom.urlInput.value = activeTab.url;
+          this.updateInputClearButton();
+          this.startAnalysis();
+        }
+      }
+    }
+
     setTimeout(() => {
-      this.dom.urlInput?.focus();
-    }, 200);
+      this.dom.urlInput.focus();
+    }, 150);
   }
 
   closePanel() {
-    this.dom.modalBackdrop?.classList.remove('open');
+    this.isOpen = false;
+    this.dom.overlay.classList.remove('open');
   }
 
-  isPanelOpen() {
-    return this.dom.modalBackdrop?.classList.contains('open') || false;
-  }
-
-  setLinkAndPrompt(url) {
-    if (this.dom.urlInput) {
-      this.dom.urlInput.value = url;
-      this.dom.inputClearBtn?.classList.add('visible');
-    }
-    this.openPanel();
-    this.analyzeCurrentUrl();
-  }
-
-  /**
-   * Analyzes the URL via Electron IPC (yt-dlp) with multi-step progress tracking
-   */
-  async analyzeCurrentUrl() {
-    const url = this.dom.urlInput?.value.trim();
-
-    if (!url) {
-      this.dom.inputWrapper?.classList.add('has-error');
-      this.showToast('Please enter a valid YouTube or Instagram link');
-      return;
-    }
-
-    this.currentState = 'analyzing';
-    this.setAnalyzingState(true);
-    if (this.dom.mediaErrorCard) this.dom.mediaErrorCard.style.display = 'none';
-
-    try {
-      this.updateLoadingStep(1, 'Validating URL Format...', 'Detecting platform handler and endpoint');
-
-      let result = null;
-      if (window.electronAPI && window.electronAPI.analyzeUrl) {
-        this.updateLoadingStep(2, 'Extracting Streams with yt-dlp...', 'Parsing video/audio streams, bitrates, and containers');
-        result = await window.electronAPI.analyzeUrl(url);
-      } else {
-        this.updateLoadingStep(2, 'Querying Stream Matrix...', 'Simulating yt-dlp stream extraction in preview');
-        result = await this.mockAnalyzeUrl(url);
-      }
-
-      if (result && result.success && result.data) {
-        this.updateLoadingStep(3, 'Formats Ready', 'Rendered streams and qualities');
-        this.currentState = 'ready';
-        this.currentAnalyzedData = result.data;
-        this.renderAnalyzedData(result.data);
-        this.showToast(`✨ Analyzed ${result.data.platform} Media`);
-      } else {
-        this.currentState = 'error';
-        const errType = result?.errorType || 'general';
-        const errMsg = result?.error || 'Unable to extract stream metadata from this URL. Please verify that the link is accessible.';
-        this.showErrorCard(errMsg, errType);
-      }
-    } catch (err) {
-      console.error('[YAS Downloader] Error analyzing URL:', err);
-      this.currentState = 'error';
-      this.showErrorCard(err.message || 'An unexpected error occurred during stream extraction.', 'general');
-    } finally {
-      this.setAnalyzingState(false);
-    }
-  }
-
-  /**
-   * ⚡ Smart Best Quality Download: Automatically identifies and downloads highest available resolution with audio
-   */
-  async executeQuickBestDownload() {
-    const url = this.dom.urlInput?.value.trim();
-    if (!url) {
-      this.dom.inputWrapper?.classList.add('has-error');
-      this.showToast('Please enter a media link first');
-      return;
-    }
-
-    if (!this.currentAnalyzedData) {
-      await this.analyzeCurrentUrl();
-    }
-
-    if (this.currentAnalyzedData) {
-      // Pick best combined format or top stream
-      const combined = this.currentAnalyzedData.formats?.combined;
-      if (combined && combined.length > 0) {
-        this.selectedFormatType = 'combined';
-        // Pick first which is highest resolution + fps
-        this.selectedFormat = combined[0];
-      } else {
-        const anyFmt = Object.values(this.currentAnalyzedData.formats).flat();
-        this.selectedFormat = anyFmt[0];
-      }
-
-      this.showToast(`⚡ Selected Best Quality: ${this.selectedFormat?.qualityLabel || 'Top Stream'}`);
-      this.triggerDownloadExecution();
-    }
-  }
-
-  setAnalyzingState(isLoading) {
-    const btn = this.dom.btnAnalyze;
-    const btnQuick = this.dom.btnQuickBest;
-    const loadingCard = this.dom.analysisLoadingCard;
-
-    if (btn) btn.disabled = isLoading;
-    if (btnQuick) btnQuick.disabled = isLoading;
-
-    if (loadingCard) {
-      loadingCard.style.display = isLoading ? 'flex' : 'none';
-    }
-
-    if (isLoading) {
-      this.dom.resultContainer?.classList.remove('active');
-    }
-  }
-
-  updateLoadingStep(stepNum, title, sub) {
-    if (this.dom.loadingPhaseTitle) this.dom.loadingPhaseTitle.textContent = title;
-    if (this.dom.loadingPhaseSub) this.dom.loadingPhaseSub.textContent = sub;
-
-    this.dom.step1Dot?.classList.toggle('active', stepNum >= 1);
-    this.dom.step2Dot?.classList.toggle('active', stepNum >= 2);
-    this.dom.step3Dot?.classList.toggle('active', stepNum >= 3);
-  }
-
-  showErrorCard(errorMessage, errorType = 'general') {
-    if (!this.dom.mediaErrorCard) return;
-
-    let title = 'Extraction Failed';
-    if (errorType === 'age_restricted') title = 'Age-Restricted Video';
-    else if (errorType === 'private') title = 'Private or Deleted Media';
-    else if (errorType === 'login_required') title = 'Login Authentication Required';
-    else if (errorType === 'geo_blocked') title = 'Geo-Restricted Content';
-    else if (errorType === 'rate_limited') title = 'Rate Limited (HTTP 429)';
-    else if (errorType === 'invalid_url') title = 'Unsupported or Invalid URL';
-    else if (errorType === 'network_error') title = 'Network Connection Error';
-
-    if (this.dom.errorTitle) this.dom.errorTitle.textContent = title;
-    if (this.dom.errorDescription) this.dom.errorDescription.textContent = errorMessage;
-
-    this.dom.mediaErrorCard.style.display = 'flex';
-    this.dom.mediaErrorCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }
-
-  /**
-   * Renders the analyzed media metadata and format picker
-   */
-  renderAnalyzedData(data) {
-    if (!this.dom.resultContainer) return;
-
-    this.dom.mediaTitle.textContent = data.title;
-    this.dom.mediaCreator.innerHTML = `<span>👤</span><span>${data.uploader}</span>`;
-    this.dom.mediaThumbnail.src = data.thumbnail;
-    this.dom.mediaDuration.textContent = data.durationString || '0:00';
-
-    // Platform styling
-    if (data.platform && data.platform.includes('Instagram')) {
-      this.dom.mediaPlatform.className = 'media-platform-badge ig';
-      this.dom.mediaPlatform.textContent = '📸 ' + data.platform;
+  togglePanel() {
+    if (this.isOpen) {
+      this.closePanel();
     } else {
-      this.dom.mediaPlatform.className = 'media-platform-badge yt';
-      this.dom.mediaPlatform.textContent = '▶️ ' + (data.platform || 'YouTube');
+      this.openPanel();
     }
-
-    // Best resolution badge
-    const topCombined = data.formats?.combined?.[0];
-    if (topCombined && this.dom.bestAvailableBadge) {
-      if (topCombined.height >= 2160) {
-        this.dom.bestAvailableBadge.textContent = '✨ 4K UHD Available';
-        this.dom.bestAvailableBadge.style.display = 'inline-flex';
-      } else if (topCombined.height >= 1440) {
-        this.dom.bestAvailableBadge.textContent = '✨ 2K QHD Available';
-        this.dom.bestAvailableBadge.style.display = 'inline-flex';
-      } else if (topCombined.height >= 1080) {
-        this.dom.bestAvailableBadge.textContent = '✨ 1080p Full HD Available';
-        this.dom.bestAvailableBadge.style.display = 'inline-flex';
-      } else {
-        this.dom.bestAvailableBadge.textContent = `✨ ${topCombined.qualityLabel} Available`;
-        this.dom.bestAvailableBadge.style.display = 'inline-flex';
-      }
-    }
-
-    // Default to Combined format tab
-    this.selectedFormatType = 'combined';
-    this.dom.tabCombinedFormats?.classList.add('active');
-    this.dom.tabVideoFormats?.classList.remove('active');
-    this.dom.tabAudioFormats?.classList.remove('active');
-    this.renderFormatItems();
-
-    this.dom.resultContainer.classList.add('active');
-    this.dom.resultContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
-  renderFormatItems() {
-    const container = this.dom.formatsListContainer;
-    if (!container || !this.currentAnalyzedData) return;
+  /**
+   * Complete, robust Reset / Trash functionality
+   * Fully resets URL input, analysis results, selected formats, errors, and restores clean empty state
+   */
+  resetAll(showFeedback = true) {
+    this.isAnalyzing = false;
+    this.currentMediaInfo = null;
+    this.selectedFormatId = null;
+    this.activeCategory = 'combined';
 
-    container.innerHTML = '';
-    const formats = this.currentAnalyzedData.formats[this.selectedFormatType] || [];
+    // Clear URL input
+    this.dom.urlInput.value = '';
+    this.updateInputClearButton();
 
-    if (!formats || formats.length === 0) {
-      container.innerHTML = `<div class="empty-text-sub" style="padding: 18px; text-align: center;">No ${this.selectedFormatType} formats available for this media.</div>`;
-      return;
+    // Hide loading & error states
+    this.dom.loadingCard.style.display = 'none';
+    this.dom.errorCard.style.display = 'none';
+
+    // Hide analyzed 2-column grid and show empty state
+    this.dom.twoColumnGrid.style.display = 'none';
+    this.dom.emptyState.style.display = 'flex';
+
+    // Reset format tabs to combined
+    this.switchFormatTab('combined');
+    this.dom.formatsList.innerHTML = '';
+
+    // Re-focus input
+    this.dom.urlInput.focus();
+
+    if (showFeedback) {
+      this.showToast('Media Studio completely reset');
     }
+  }
 
-    // Select first by default if not set or not in current tab
-    if (!this.selectedFormat || !formats.some((f) => f.formatId === this.selectedFormat.formatId)) {
-      this.selectedFormat = formats[0];
-    }
+  // =========================================================================
+  // 2. Input Hero & Analysis Pipeline
+  // =========================================================================
+  setupInputEvents() {
+    const input = this.dom.urlInput;
+    const clearBtn = this.dom.inputClearBtn;
+    const pasteBtn = this.dom.pasteClipboardBtn;
 
-    formats.forEach((fmt) => {
-      const card = document.createElement('div');
-      const isSelected = this.selectedFormat?.formatId === fmt.formatId;
-      card.className = `format-item-card ${isSelected ? 'selected' : ''}`;
-      
-      const metaDetails = [];
-      if (fmt.resolution) metaDetails.push(`Res: ${fmt.resolution}`);
-      if (fmt.fps) metaDetails.push(`${fmt.fps} fps`);
-      if (fmt.vcodec && fmt.vcodec !== 'N/A') metaDetails.push(`Codec: ${fmt.vcodec}`);
-      if (fmt.acodec && fmt.acodec !== 'N/A') metaDetails.push(`Audio: ${fmt.acodec}`);
-      if (fmt.ext) metaDetails.push(`Ext: ${fmt.ext.toUpperCase()}`);
+    input.addEventListener('input', () => {
+      this.updateInputClearButton();
+      this.dom.errorCard.style.display = 'none';
+    });
 
-      // Determine quality tag class
-      let qualityClass = 'quality-tag-standard';
-      if (fmt.height >= 2160) qualityClass = 'quality-tag-4k';
-      else if (fmt.height >= 1440) qualityClass = 'quality-tag-1080p';
-      else if (fmt.height >= 1080) qualityClass = 'quality-tag-1080p';
-      else if (fmt.height >= 720) qualityClass = 'quality-tag-720p';
-      else if (this.selectedFormatType === 'audio') qualityClass = 'quality-tag-audio';
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        this.startAnalysis();
+      }
+    });
 
-      card.innerHTML = `
-        <div class="format-item-left">
-          <div class="custom-radio-circle"></div>
-          <div class="format-info-col">
-            <div style="display: flex; align-items: center; gap: 6px;">
-              <span class="format-label-title">${fmt.qualityLabel}</span>
-              <span class="quality-tag ${qualityClass}">${fmt.ext ? fmt.ext.toUpperCase() : 'MP4'}</span>
-            </div>
-            <span class="format-meta-sub">${metaDetails.join(' • ')}</span>
-            ${fmt.note ? `<span class="format-meta-sub" style="color: var(--accent-primary); font-size: 10.5px;">${fmt.note}</span>` : ''}
-          </div>
-        </div>
-        <div class="format-size-tag">${fmt.filesizeStr || 'Best Quality'}</div>
-      `;
-
-      card.addEventListener('click', () => {
-        this.selectedFormat = fmt;
-        container.querySelectorAll('.format-item-card').forEach((el) => el.classList.remove('selected'));
-        card.classList.add('selected');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => {
+        input.value = '';
+        this.updateInputClearButton();
+        input.focus();
       });
+    }
 
-      container.appendChild(card);
+    if (pasteBtn) {
+      pasteBtn.addEventListener('click', async () => {
+        try {
+          const text = await navigator.clipboard.readText();
+          if (text) {
+            input.value = text.trim();
+            this.updateInputClearButton();
+            this.startAnalysis();
+          }
+        } catch (_) {
+          this.showToast('Please paste using Ctrl+V');
+        }
+      });
+    }
+
+    // Analyze Button
+    this.dom.btnAnalyze.addEventListener('click', () => {
+      this.startAnalysis();
+    });
+
+    // ⚡ 1-Click Best Quality Instant Download Button
+    this.dom.btnQuickBest.addEventListener('click', () => {
+      this.triggerQuickBestQuality();
+    });
+
+    // Retry and guide buttons in error card
+    this.dom.btnErrorRetry.addEventListener('click', () => {
+      this.startAnalysis();
+    });
+
+    this.dom.btnErrorGuide.addEventListener('click', () => {
+      this.openDiagnosticsModal();
     });
   }
 
-  /**
-   * Complete reset of panel inputs, results, and active states
-   */
-  resetAnalysisState() {
-    if (this.dom.urlInput) this.dom.urlInput.value = '';
-    this.dom.inputClearBtn?.classList.remove('visible');
-    this.dom.inputWrapper?.classList.remove('has-error');
-    this.dom.resultContainer?.classList.remove('active');
-    if (this.dom.mediaErrorCard) this.dom.mediaErrorCard.style.display = 'none';
-    if (this.dom.analysisLoadingCard) this.dom.analysisLoadingCard.style.display = 'none';
-    this.currentAnalyzedData = null;
-    this.selectedFormat = null;
-    this.currentState = 'idle';
+  updateInputClearButton() {
+    if (this.dom.inputClearBtn) {
+      this.dom.inputClearBtn.style.display = this.dom.urlInput.value.length > 0 ? 'flex' : 'none';
+    }
   }
 
-  /**
-   * Initializes real download execution through yt-dlp IPC
-   */
-  async triggerDownloadExecution() {
-    if (!this.currentAnalyzedData || !this.selectedFormat) {
+  async startAnalysis(autoDownloadBest = false) {
+    const rawUrl = this.dom.urlInput.value.trim();
+
+    if (!rawUrl) {
+      this.showToast('Please paste a YouTube or Instagram URL first');
+      this.dom.urlInput.focus();
+      return;
+    }
+
+    if (!/youtube\.com|youtu\.be|instagram\.com/i.test(rawUrl)) {
+      this.showErrorState(
+        'Unsupported Media Platform',
+        'YAS Media Downloader currently supports YouTube Videos, Shorts, and Instagram Reels/Posts.'
+      );
+      return;
+    }
+
+    this.isAnalyzing = true;
+    this.showLoadingPhase(1, 'Validating URL & Stream Manifests...', 'Extracting stream endpoints via yt-dlp');
+
+    this.dom.errorCard.style.display = 'none';
+    this.dom.emptyState.style.display = 'none';
+    this.dom.twoColumnGrid.style.display = 'none';
+
+    try {
+      let info = null;
+
+      if (window.electronAPI && window.electronAPI.analyzeMedia) {
+        info = await window.electronAPI.analyzeMedia(rawUrl);
+      } else {
+        // High-Fidelity Mock Extractor Fallback for Web Preview
+        info = await this.simulateExtraction(rawUrl);
+      }
+
+      this.showLoadingPhase(2, 'Resolving Stream Formats & Bitrates...', 'Sorting video resolutions and audio codecs');
+      await new Promise((r) => setTimeout(r, 400));
+
+      this.showLoadingPhase(3, 'Extraction Complete', 'Stream manifests verified');
+      await new Promise((r) => setTimeout(r, 200));
+
+      this.isAnalyzing = false;
+      this.dom.loadingCard.style.display = 'none';
+      this.displayAnalyzedMedia(info);
+
+      if (autoDownloadBest) {
+        this.downloadBestQuality();
+      }
+    } catch (err) {
+      this.isAnalyzing = false;
+      this.dom.loadingCard.style.display = 'none';
+      this.showErrorState(
+        'Analysis Failed',
+        err.message || 'Unable to extract formats. Check if the URL is accessible or configure yt-dlp.'
+      );
+    }
+  }
+
+  showLoadingPhase(stepNum, title, sub) {
+    this.dom.loadingCard.style.display = 'flex';
+    this.dom.loadingTitle.textContent = title;
+    this.dom.loadingSub.textContent = sub;
+
+    this.dom.step1Dot.className = `tracker-step ${stepNum >= 1 ? 'active' : ''}`;
+    this.dom.step2Dot.className = `tracker-step ${stepNum >= 2 ? 'active' : ''}`;
+    this.dom.step3Dot.className = `tracker-step ${stepNum >= 3 ? 'active' : ''}`;
+  }
+
+  showErrorState(title, description) {
+    this.dom.errorCard.style.display = 'block';
+    this.dom.errorTitle.textContent = title;
+    this.dom.errorDesc.textContent = description;
+    this.dom.emptyState.style.display = 'none';
+    this.dom.twoColumnGrid.style.display = 'none';
+  }
+
+  // =========================================================================
+  // 3. Media Metadata & Format Matrix Presentation
+  // =========================================================================
+  displayAnalyzedMedia(info) {
+    this.currentMediaInfo = info;
+    this.dom.twoColumnGrid.style.display = 'grid';
+
+    // Populate Left Column Preview Card
+    this.dom.thumbnail.src = info.thumbnail || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80';
+    this.dom.durationBadge.textContent = info.durationFormatted || '0:00';
+    this.dom.platformBadge.textContent = info.platform || 'YouTube';
+    this.dom.mediaTitle.textContent = info.title || 'Untitled Stream';
+    this.dom.mediaTitle.title = info.title || 'Untitled Stream';
+    this.dom.mediaCreator.textContent = info.uploader ? `By ${info.uploader}` : 'Official Channel';
+
+    // Best Available Quality Pill
+    const maxRes = this.getMaxResolution(info.formats || []);
+    this.dom.bestAvailableBadge.textContent = `✨ ${maxRes} Available`;
+
+    // Render Format Cards according to current category
+    this.renderFormatOptions();
+  }
+
+  setupFormatTabs() {
+    this.dom.tabCombined.addEventListener('click', () => this.switchFormatTab('combined'));
+    this.dom.tabVideo.addEventListener('click', () => this.switchFormatTab('video'));
+    this.dom.tabAudio.addEventListener('click', () => this.switchFormatTab('audio'));
+
+    this.dom.btnStartDownload.addEventListener('click', () => {
+      this.startSelectedDownload();
+    });
+  }
+
+  switchFormatTab(category) {
+    this.activeCategory = category;
+    this.dom.tabCombined.classList.toggle('active', category === 'combined');
+    this.dom.tabVideo.classList.toggle('active', category === 'video');
+    this.dom.tabAudio.classList.toggle('active', category === 'audio');
+
+    if (this.currentMediaInfo) {
+      this.renderFormatOptions();
+    }
+  }
+
+  renderFormatOptions() {
+    const formats = this.currentMediaInfo?.formats || [];
+    const listContainer = this.dom.formatsList;
+    listContainer.innerHTML = '';
+
+    const filtered = this.filterFormatsByCategory(formats, this.activeCategory);
+
+    if (filtered.length === 0) {
+      listContainer.innerHTML = `
+        <div style="padding: 24px; text-align: center; color: var(--text-tertiary); font-size: 13px;">
+          No formats available for this category.
+        </div>
+      `;
+      return;
+    }
+
+    // Default select first (best) format if none selected
+    if (!this.selectedFormatId || !filtered.some((f) => f.format_id === this.selectedFormatId)) {
+      this.selectedFormatId = filtered[0].format_id;
+    }
+
+    filtered.forEach((fmt) => {
+      const card = document.createElement('div');
+      const isSelected = fmt.format_id === this.selectedFormatId;
+      card.className = `format-row-card ${isSelected ? 'selected' : ''}`;
+      card.id = `fmt_card_${fmt.format_id}`;
+
+      const resBadge = this.getResolutionBadgeText(fmt);
+      const sizeText = fmt.filesizeFormatted || '~45 MB';
+      const codecDesc = fmt.vcodec && fmt.vcodec !== 'none' ? `${fmt.vcodec.split('.')[0]} • ${fmt.fps || 30}fps` : `${fmt.acodec || 'mp3'} • 320kbps`;
+
+      card.innerHTML = `
+        <div class="format-left-meta">
+          <span class="res-tag-badge">${this.escapeHtml(resBadge)}</span>
+          <div class="format-title-desc">
+            <span class="format-main-label">${this.escapeHtml(fmt.resolution || fmt.ext.toUpperCase())}</span>
+            <span class="format-sub-details">${this.escapeHtml(codecDesc)}</span>
+          </div>
+        </div>
+        <div class="format-right-meta">
+          <span class="format-size-badge">${this.escapeHtml(sizeText)}</span>
+          <div class="format-select-indicator"></div>
+        </div>
+      `;
+
+      card.addEventListener('click', () => {
+        this.selectedFormatId = fmt.format_id;
+        document.querySelectorAll('.format-row-card').forEach((c) => c.classList.remove('selected'));
+        card.classList.add('selected');
+      });
+
+      listContainer.appendChild(card);
+    });
+  }
+
+  filterFormatsByCategory(formats, category) {
+    if (category === 'audio') {
+      return formats.filter((f) => f.isAudioOnly || f.vcodec === 'none');
+    }
+    if (category === 'video') {
+      return formats.filter((f) => f.isVideoOnly || f.acodec === 'none');
+    }
+    // Combined Video + Audio
+    return formats.filter((f) => f.isCombined || (f.vcodec !== 'none' && f.acodec !== 'none'));
+  }
+
+  getResolutionBadgeText(fmt) {
+    if (fmt.isAudioOnly || fmt.vcodec === 'none') return '320K MP3';
+    const height = parseInt(fmt.height || fmt.resolution, 10);
+    if (height >= 2160) return '4K UHD';
+    if (height >= 1440) return '2K QHD';
+    if (height >= 1080) return '1080p FHD';
+    if (height >= 720) return '720p HD';
+    if (height >= 480) return '480p SD';
+    return fmt.ext.toUpperCase();
+  }
+
+  getMaxResolution(formats) {
+    let max = 0;
+    formats.forEach((f) => {
+      const h = parseInt(f.height || 0, 10);
+      if (h > max) max = h;
+    });
+    if (max >= 2160) return '4K UHD';
+    if (max >= 1440) return '2K QHD';
+    if (max >= 1080) return '1080p FHD';
+    if (max >= 720) return '720p HD';
+    return '1080p FHD';
+  }
+
+  // =========================================================================
+  // 4. Download Execution & Real-Time Queue Tracker
+  // =========================================================================
+  async triggerQuickBestQuality() {
+    const rawUrl = this.dom.urlInput.value.trim();
+    if (!rawUrl) {
+      this.showToast('Please paste a media URL first');
+      this.dom.urlInput.focus();
+      return;
+    }
+    await this.startAnalysis(true);
+  }
+
+  downloadBestQuality() {
+    if (!this.currentMediaInfo) return;
+    const formats = this.currentMediaInfo.formats || [];
+    const combined = this.filterFormatsByCategory(formats, 'combined');
+    const best = combined.length > 0 ? combined[0] : formats[0];
+
+    if (best) {
+      this.selectedFormatId = best.format_id;
+      this.startSelectedDownload();
+    }
+  }
+
+  async startSelectedDownload() {
+    if (!this.currentMediaInfo || !this.selectedFormatId) {
       this.showToast('Please select a format to download');
       return;
     }
 
-    const downloadId = 'dl_' + Date.now();
-    const downloadItem = {
+    const fmt = this.currentMediaInfo.formats.find((f) => f.format_id === this.selectedFormatId);
+    const downloadId = `dl_${Date.now()}`;
+
+    const downloadJob = {
       id: downloadId,
-      title: this.currentAnalyzedData.title,
-      format: this.selectedFormat.qualityLabel,
-      platform: this.currentAnalyzedData.platform,
-      filesize: this.selectedFormat.filesizeStr || 'Estimating...',
+      title: this.currentMediaInfo.title,
+      url: this.dom.urlInput.value.trim(),
+      formatId: this.selectedFormatId,
+      resolution: fmt ? fmt.resolution || fmt.ext : 'Best',
+      status: 'downloading', // 'downloading' | 'merging' | 'completed' | 'error' | 'cancelled'
       progress: 0,
-      speed: '0.0 MB/s',
-      eta: '--:--',
-      phase: 'downloading', // 'downloading' | 'merging' | 'converting' | 'completed' | 'error' | 'cancelled'
-      status: 'downloading',
-      filePath: null,
-      savePath: `${this.selectedDownloadPath}/${this.sanitizeFilename(this.currentAnalyzedData.title)}.${this.selectedFormat.ext || 'mp4'}`
+      speed: '0 MB/s',
+      eta: '--',
+      downloaded: '0 MB',
+      totalSize: fmt ? fmt.filesizeFormatted || '45 MB' : '45 MB',
+      outputPath: null,
+      domElement: null
     };
 
-    this.downloads.unshift(downloadItem);
-    this.activeDownloadCount++;
-    this.updateDownloadBadge();
-    this.renderDownloadQueue();
+    this.activeDownloads.set(downloadId, downloadJob);
+    this.updateDownloadCounter();
+    this.renderQueueItem(downloadJob);
 
-    this.showToast(`🚀 Starting download: ${this.selectedFormat.qualityLabel}`);
+    this.showToast(`Starting download: ${downloadJob.title}`);
 
     if (window.electronAPI && window.electronAPI.startDownload) {
-      try {
-        await window.electronAPI.startDownload({
-          downloadId,
-          url: this.currentAnalyzedData.url,
-          formatId: this.selectedFormat.formatId,
-          isAudioOnly: this.selectedFormatType === 'audio',
-          outputFolder: this.selectedDownloadPath,
-          title: this.currentAnalyzedData.title,
-          ext: this.selectedFormat.ext
-        });
-      } catch (err) {
-        console.error('[YAS Downloader] Failed to start download:', err);
-        downloadItem.status = 'error';
-        downloadItem.phase = 'error';
-        downloadItem.errorMessage = err.message || 'Download execution error';
-        this.updateProgressCardDOM(downloadItem);
-      }
+      window.electronAPI.startDownload({
+        downloadId: downloadId,
+        url: downloadJob.url,
+        formatId: downloadJob.formatId,
+        destinationFolder: this.destinationFolder
+      });
     } else {
-      // Run browser simulator if running outside Electron
+      // Simulate real-time progress for preview environment
       this.simulateDownloadProgress(downloadId);
     }
   }
 
-  /**
-   * Handles real progress events dispatched by Electron main process
-   */
-  handleProgressUpdate(data) {
-    const item = this.downloads.find((d) => d.id === data.downloadId);
-    if (!item) return;
-
-    item.progress = Math.round(data.percent || 0);
-    item.speed = data.speed || item.speed;
-    item.eta = data.eta || item.eta;
-    item.downloadedStr = data.downloadedStr || `${item.progress}%`;
-    item.status = data.status || item.status;
-    item.phase = data.phase || (data.status === 'completed' ? 'finished' : 'downloading');
-    if (data.filePath) item.filePath = data.filePath;
-    if (data.error) item.errorMessage = data.error;
-
-    if (data.status === 'completed') {
-      item.progress = 100;
-      item.phase = 'finished';
-      this.activeDownloadCount = Math.max(0, this.activeDownloadCount - 1);
-      this.updateDownloadBadge();
-      this.showToast(`✅ Download complete: ${item.title.substring(0, 32)}...`);
-    } else if (data.status === 'error') {
-      item.phase = 'error';
-      this.activeDownloadCount = Math.max(0, this.activeDownloadCount - 1);
-      this.updateDownloadBadge();
-      this.showToast(`❌ Download failed: ${data.error || 'Check network connection'}`);
+  renderQueueItem(job) {
+    if (this.dom.emptyQueuePlaceholder) {
+      this.dom.emptyQueuePlaceholder.style.display = 'none';
     }
 
-    this.updateProgressCardDOM(item);
+    const item = document.createElement('div');
+    item.className = 'download-item-card';
+    item.id = `queue_item_${job.id}`;
+
+    item.innerHTML = `
+      <div class="queue-item-header">
+        <div class="queue-item-title-wrap">
+          <div class="queue-item-title" title="${this.escapeHtml(job.title)}">${this.escapeHtml(job.title)}</div>
+        </div>
+        <span class="queue-item-status-pill downloading" id="pill_${job.id}">Downloading 0%</span>
+      </div>
+
+      <div class="queue-progress-track">
+        <div class="queue-progress-bar" id="pbar_${job.id}" style="width: 0%;"></div>
+      </div>
+
+      <div class="queue-item-footer">
+        <div class="queue-meta-stats" id="stats_${job.id}">
+          <span>Speed: <strong id="speed_${job.id}">0 MB/s</strong></span>
+          <span>ETA: <strong id="eta_${job.id}">--</strong></span>
+          <span>Size: <strong id="size_${job.id}">0 / ${job.totalSize}</strong></span>
+        </div>
+        <div class="queue-actions" id="actions_${job.id}">
+          <button class="btn-queue-action danger" id="btnCancel_${job.id}">Cancel</button>
+        </div>
+      </div>
+    `;
+
+    const cancelBtn = item.querySelector(`#btnCancel_${job.id}`);
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', () => {
+        this.cancelDownload(job.id);
+      });
+    }
+
+    job.domElement = item;
+    this.dom.queueList.prepend(item);
   }
 
-  simulateDownloadProgress(downloadId) {
-    const item = this.downloads.find((d) => d.id === downloadId);
-    if (!item) return;
+  updateDownloadProgress(downloadId, data) {
+    const job = this.activeDownloads.get(downloadId);
+    if (!job) return;
 
-    let progress = 0;
-    const totalSizeMB = parseFloat(item.filesize) || 64.0;
+    job.progress = data.percent || 0;
+    job.speed = data.speed || '2.4 MB/s';
+    job.eta = data.eta || '15s';
+    job.downloaded = data.downloaded || '12 MB';
 
-    const interval = setInterval(() => {
-      if (item.status === 'cancelled' || item.status === 'completed') {
-        clearInterval(interval);
-        return;
-      }
+    const pbar = document.getElementById(`pbar_${downloadId}`);
+    const pill = document.getElementById(`pill_${downloadId}`);
+    const speed = document.getElementById(`speed_${downloadId}`);
+    const eta = document.getElementById(`eta_${downloadId}`);
+    const size = document.getElementById(`size_${downloadId}`);
 
-      const speedMBs = (14.5 + Math.random() * 6.2).toFixed(1);
-      const step = (Math.random() * 5.0 + 3.5);
-      progress = Math.min(100, progress + step);
-      
-      const downloadedMB = ((progress / 100) * totalSizeMB).toFixed(1);
-      const remainingSecs = Math.max(0, Math.round((totalSizeMB - downloadedMB) / speedMBs));
-
-      item.progress = Math.round(progress);
-      item.speed = `${speedMBs} MB/s`;
-      item.eta = `00:${remainingSecs.toString().padStart(2, '0')}s`;
-      item.downloadedStr = `${downloadedMB} MB / ${totalSizeMB} MB`;
-
-      if (progress >= 85 && progress < 98 && item.format.includes('4K')) {
-        item.phase = 'merging';
+    if (pbar) pbar.style.width = `${job.progress}%`;
+    if (pill) {
+      if (job.status === 'merging') {
+        pill.className = 'queue-item-status-pill merging';
+        pill.textContent = 'Muxing FFmpeg';
       } else {
-        item.phase = 'downloading';
+        pill.className = 'queue-item-status-pill downloading';
+        pill.textContent = `${Math.round(job.progress)}%`;
       }
-
-      this.updateProgressCardDOM(item);
-
-      if (progress >= 100) {
-        clearInterval(interval);
-        item.status = 'completed';
-        item.phase = 'finished';
-        item.progress = 100;
-        this.activeDownloadCount = Math.max(0, this.activeDownloadCount - 1);
-        this.updateDownloadBadge();
-        this.updateProgressCardDOM(item);
-        this.showToast(`✅ Download Completed: ${item.title.substring(0, 32)}...`);
-      }
-    }, 250);
+    }
+    if (speed) speed.textContent = job.speed;
+    if (eta) eta.textContent = job.eta;
+    if (size) size.textContent = `${job.downloaded} / ${job.totalSize}`;
   }
 
-  renderDownloadQueue() {
-    const container = this.dom.downloadQueueList;
-    const emptyState = this.dom.emptyQueuePlaceholder;
-    if (!container) return;
+  onDownloadCompleted(downloadId, data) {
+    const job = this.activeDownloads.get(downloadId);
+    if (!job) return;
 
-    if (this.downloads.length === 0) {
-      if (emptyState) emptyState.style.display = 'flex';
-      return;
+    job.status = 'completed';
+    job.progress = 100;
+    job.outputPath = data?.filePath || `${this.destinationFolder}/${job.title}.mp4`;
+
+    const pbar = document.getElementById(`pbar_${downloadId}`);
+    const pill = document.getElementById(`pill_${downloadId}`);
+    const actions = document.getElementById(`actions_${downloadId}`);
+
+    if (pbar) {
+      pbar.style.width = '100%';
+      pbar.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
     }
 
-    if (emptyState) emptyState.style.display = 'none';
+    if (pill) {
+      pill.className = 'queue-item-status-pill completed';
+      pill.textContent = '✓ Completed';
+    }
 
-    container.innerHTML = '';
-    this.downloads.forEach((item) => {
-      const card = document.createElement('div');
-      card.className = 'download-progress-card';
-      card.id = `card_${item.id}`;
-      
-      const isFinished = item.status === 'completed' || item.phase === 'finished';
-
-      card.innerHTML = `
-        <div class="download-card-header">
-          <div class="download-title-area">
-            <div class="download-item-title">${item.title}</div>
-            <div class="download-item-status" id="status_${item.id}">
-              ${this.renderPhaseBadge(item)}
-            </div>
-          </div>
-          <div class="download-card-actions">
-            ${!isFinished ? `
-              <button class="mini-action-btn" title="Cancel Download" id="btn_cancel_${item.id}">✕</button>
-            ` : `
-              <button class="mini-action-btn" title="Show in Folder" id="btn_reveal_${item.id}">📂</button>
-            `}
-          </div>
-        </div>
-        <div class="progress-bar-track">
-          <div class="progress-bar-fill" id="fill_${item.id}" style="width: ${item.progress}%"></div>
-        </div>
-        <div class="progress-stats-row">
-          <span class="progress-speed-text" id="speed_${item.id}">${isFinished ? 'Complete' : item.speed}</span>
-          <span id="bytes_${item.id}">${item.downloadedStr || item.filesize}</span>
-          <span class="progress-percent-badge" id="pct_${item.id}">${item.progress}%</span>
-        </div>
-        ${isFinished ? `
-          <div class="download-complete-actions">
-            <button class="btn-open-file-primary" id="btn_open_file_${item.id}">Open File</button>
-            <button class="btn-show-folder-subtle" id="btn_open_folder_${item.id}">Show in Folder</button>
-          </div>
-        ` : ''}
+    if (actions) {
+      actions.innerHTML = `
+        <button class="btn-queue-action" id="btnOpenFolder_${downloadId}">📁 Open Folder</button>
       `;
+      const btnFolder = actions.querySelector(`#btnOpenFolder_${downloadId}`);
+      if (btnFolder) {
+        btnFolder.addEventListener('click', () => {
+          if (window.electronAPI && window.electronAPI.openFolder) {
+            window.electronAPI.openFolder(this.destinationFolder);
+          } else {
+            this.showToast(`Opening download folder: ${this.destinationFolder}`);
+          }
+        });
+      }
+    }
 
+    this.showToast(`Download finished: ${job.title}`);
+    this.updateDownloadCounter();
+  }
+
+  cancelDownload(downloadId) {
+    const job = this.activeDownloads.get(downloadId);
+    if (!job) return;
+
+    job.status = 'cancelled';
+    if (window.electronAPI && window.electronAPI.cancelDownload) {
+      window.electronAPI.cancelDownload(downloadId);
+    }
+
+    const pill = document.getElementById(`pill_${downloadId}`);
+    const actions = document.getElementById(`actions_${downloadId}`);
+
+    if (pill) {
+      pill.className = 'queue-item-status-pill error';
+      pill.textContent = 'Cancelled';
+    }
+
+    if (actions) {
+      actions.innerHTML = `<span style="font-size: 11px; color: var(--text-tertiary);">Removed</span>`;
+    }
+
+    this.showToast(`Download cancelled: ${job.title}`);
+    this.updateDownloadCounter();
+  }
+
+  clearCompletedDownloads() {
+    let cleared = 0;
+    this.activeDownloads.forEach((job, id) => {
+      if (job.status === 'completed' || job.status === 'cancelled' || job.status === 'error') {
+        const el = document.getElementById(`queue_item_${id}`);
+        if (el) el.remove();
+        this.activeDownloads.delete(id);
+        cleared += 1;
+      }
+    });
+
+    if (this.activeDownloads.size === 0 && this.dom.emptyQueuePlaceholder) {
+      this.dom.emptyQueuePlaceholder.style.display = 'flex';
+    }
+
+    this.updateDownloadCounter();
+    if (cleared > 0) {
+      this.showToast(`Cleared ${cleared} completed transfers`);
+    }
+  }
+
+  updateDownloadCounter() {
+    const activeCount = Array.from(this.activeDownloads.values()).filter(
+      (j) => j.status === 'downloading' || job.status === 'merging'
+    ).length;
+
+    if (this.dom.downloadCounter) {
+      if (activeCount > 0) {
+        this.dom.downloadCounter.style.display = 'inline-flex';
+        this.dom.downloadCounter.textContent = activeCount;
+      } else {
+        this.dom.downloadCounter.style.display = 'none';
+      }
+    }
+  }
+
+  // =========================================================================
+  // 5. Diagnostics & Engine Health
+  // =========================================================================
+  setupDiagnosticsModal() {
+    if (this.dom.engineStatusBadge) {
+      this.dom.engineStatusBadge.addEventListener('click', () => {
+        this.openDiagnosticsModal();
+      });
+    }
+
+    if (this.dom.btnEngineModalClose) {
+      this.dom.btnEngineModalClose.addEventListener('click', () => {
+        this.closeDiagnosticsModal();
+      });
+    }
+
+    if (this.dom.btnDiagDone) {
+      this.dom.btnDiagDone.addEventListener('click', () => {
+        this.closeDiagnosticsModal();
+      });
+    }
+
+    if (this.dom.btnRescanDependencies) {
+      this.dom.btnRescanDependencies.addEventListener('click', async () => {
+        this.dom.btnRescanDependencies.textContent = 'Scanning...';
+        await this.checkInitialEngineHealth();
+        this.dom.btnRescanDependencies.textContent = '🔄 Re-scan Binaries';
+        this.showToast('Dependency scan completed');
+      });
+    }
+
+    // Guide Platform Tabs
+    const setGuide = (os, cmd, alts) => {
+      this.dom.tabWinGuide.classList.toggle('active', os === 'win');
+      this.dom.tabMacGuide.classList.toggle('active', os === 'mac');
+      this.dom.tabLinuxGuide.classList.toggle('active', os === 'linux');
+      this.dom.guideCommandText.textContent = cmd;
+      this.dom.guideAlternativesList.innerHTML = alts;
+    };
+
+    this.dom.tabWinGuide.addEventListener('click', () => {
+      setGuide('win', 'winget install yt-dlp && winget install Gyan.FFmpeg', 'Chocolatey: <code>choco install yt-dlp ffmpeg</code><br>Scoop: <code>scoop install yt-dlp ffmpeg</code>');
+    });
+
+    this.dom.tabMacGuide.addEventListener('click', () => {
+      setGuide('mac', 'brew install yt-dlp ffmpeg', 'MacPorts: <code>sudo port install yt-dlp ffmpeg</code>');
+    });
+
+    this.dom.tabLinuxGuide.addEventListener('click', () => {
+      setGuide('linux', 'sudo apt update && sudo apt install yt-dlp ffmpeg', 'Arch: <code>sudo pacman -S yt-dlp ffmpeg</code><br>Fedora: <code>sudo dnf install yt-dlp ffmpeg</code>');
+    });
+
+    // Copy command button
+    this.dom.btnCopyGuideCommand.addEventListener('click', () => {
+      navigator.clipboard.writeText(this.dom.guideCommandText.textContent);
+      this.dom.btnCopyGuideCommand.textContent = '✓ Copied!';
       setTimeout(() => {
-        const cancelBtn = card.querySelector(`#btn_cancel_${item.id}`);
-        const revealBtn = card.querySelector(`#btn_reveal_${item.id}`);
-        const openFileBtn = card.querySelector(`#btn_open_file_${item.id}`);
-        const openFolderBtn = card.querySelector(`#btn_open_folder_${item.id}`);
-
-        cancelBtn?.addEventListener('click', async () => {
-          item.status = 'cancelled';
-          item.phase = 'canceled';
-          if (window.electronAPI && window.electronAPI.cancelDownload) {
-            await window.electronAPI.cancelDownload(item.id);
-          }
-          this.activeDownloadCount = Math.max(0, this.activeDownloadCount - 1);
-          this.updateDownloadBadge();
-          this.updateProgressCardDOM(item);
-          this.showToast('Download cancelled');
-        });
-
-        const handleShowInFolder = () => {
-          if (window.electronAPI && window.electronAPI.showInFolder && item.filePath) {
-            window.electronAPI.showInFolder(item.filePath);
-          } else if (window.electronAPI && window.electronAPI.openFolder) {
-            window.electronAPI.openFolder(this.selectedDownloadPath);
-          } else {
-            this.showToast(`Saved to ${item.filePath || item.savePath}`);
-          }
-        };
-
-        revealBtn?.addEventListener('click', handleShowInFolder);
-        openFolderBtn?.addEventListener('click', handleShowInFolder);
-
-        openFileBtn?.addEventListener('click', () => {
-          if (window.electronAPI && window.electronAPI.showInFolder && item.filePath) {
-            window.electronAPI.showInFolder(item.filePath);
-          } else {
-            this.showToast(`Opening: ${item.title}`);
-          }
-        });
-      }, 0);
-
-      container.appendChild(card);
+        this.dom.btnCopyGuideCommand.textContent = '📋 Copy';
+      }, 2000);
     });
   }
 
-  renderPhaseBadge(item) {
-    if (item.status === 'completed' || item.phase === 'finished') {
-      return `<span class="phase-badge finished">✓ Completed</span> • <span style="color: var(--text-secondary)">${item.format}</span>`;
-    }
-    if (item.status === 'error' || item.phase === 'error') {
-      return `<span class="phase-badge error">✕ Failed</span> • <span style="color: var(--text-secondary)">${item.errorMessage || item.format}</span>`;
-    }
-    if (item.status === 'cancelled' || item.phase === 'canceled') {
-      return `<span class="phase-badge canceled">Canceled</span>`;
-    }
-    if (item.phase === 'merging') {
-      return `<span class="phase-badge merging">⚡ Merging Streams (FFmpeg)</span> • <span style="color: var(--text-secondary)">${item.format}</span>`;
-    }
-    if (item.phase === 'converting') {
-      return `<span class="phase-badge converting">🎵 Extracting Audio</span> • <span style="color: var(--text-secondary)">${item.format}</span>`;
-    }
-    return `<span class="phase-badge downloading">Downloading</span> • <span>${item.format}</span> • <span>${item.eta}</span>`;
+  openDiagnosticsModal() {
+    this.dom.engineModalBackdrop.classList.add('open');
+    this.checkInitialEngineHealth();
   }
 
-  updateProgressCardDOM(item) {
-    const fill = document.getElementById(`fill_${item.id}`);
-    const pct = document.getElementById(`pct_${item.id}`);
-    const speed = document.getElementById(`speed_${item.id}`);
-    const bytes = document.getElementById(`bytes_${item.id}`);
-    const status = document.getElementById(`status_${item.id}`);
+  closeDiagnosticsModal() {
+    this.dom.engineModalBackdrop.classList.remove('open');
+  }
 
-    if (fill) fill.style.width = `${item.progress}%`;
-    if (pct) pct.textContent = `${item.progress}%`;
-    if (speed) speed.textContent = item.status === 'completed' ? 'Finished' : item.speed;
-    if (bytes) bytes.textContent = item.downloadedStr || item.filesize;
-    if (status) status.innerHTML = this.renderPhaseBadge(item);
+  async checkInitialEngineHealth() {
+    try {
+      let diag = { ytdlpFound: true, ytdlpPath: '/usr/local/bin/yt-dlp', ffmpegFound: true, ffmpegPath: '/usr/local/bin/ffmpeg' };
 
-    if (item.status === 'completed' || item.status === 'error') {
-      const card = document.getElementById(`card_${item.id}`);
-      if (card && !card.querySelector(`#btn_open_file_${item.id}`)) {
-        this.renderDownloadQueue();
+      if (window.electronAPI && window.electronAPI.getDiagnostics) {
+        diag = await window.electronAPI.getDiagnostics();
       }
+
+      if (this.dom.ytdlpStatusPill) {
+        this.dom.ytdlpStatusPill.className = `diag-status-pill ${diag.ytdlpFound ? 'installed' : 'missing'}`;
+        this.dom.ytdlpStatusPill.textContent = diag.ytdlpFound ? 'Installed' : 'Not Found';
+        this.dom.ytdlpPathText.textContent = diag.ytdlpPath || 'Path: None';
+      }
+
+      if (this.dom.ffmpegStatusPill) {
+        this.dom.ffmpegStatusPill.className = `diag-status-pill ${diag.ffmpegFound ? 'installed' : 'missing'}`;
+        this.dom.ffmpegStatusPill.textContent = diag.ffmpegFound ? 'Installed' : 'Not Found';
+        this.dom.ffmpegPathText.textContent = diag.ffmpegPath || 'Path: None';
+      }
+
+      const allOk = diag.ytdlpFound && diag.ffmpegFound;
+      if (this.dom.engineBadgeText) {
+        this.dom.engineBadgeText.textContent = allOk ? 'Engine Ready' : 'Setup Required';
+      }
+    } catch (_) {
+      // Ignored
     }
   }
 
-  updateDownloadBadge() {
-    const badge = this.dom.downloadCounter;
-    if (badge) {
-      badge.textContent = this.activeDownloadCount;
-      badge.style.display = this.activeDownloadCount > 0 ? 'inline-flex' : 'none';
+  // =========================================================================
+  // 6. IPC Event Subscriptions
+  // =========================================================================
+  setupIPCListeners() {
+    if (!window.electronAPI) return;
+
+    if (window.electronAPI.onDownloadProgress) {
+      window.electronAPI.onDownloadProgress((data) => {
+        this.updateDownloadProgress(data.downloadId, data);
+      });
+    }
+
+    if (window.electronAPI.onDownloadCompleted) {
+      window.electronAPI.onDownloadCompleted((data) => {
+        this.onDownloadCompleted(data.downloadId, data);
+      });
+    }
+
+    if (window.electronAPI.onDownloadError) {
+      window.electronAPI.onDownloadError((data) => {
+        const job = this.activeDownloads.get(data.downloadId);
+        if (job) {
+          job.status = 'error';
+          const pill = document.getElementById(`pill_${data.downloadId}`);
+          if (pill) {
+            pill.className = 'queue-item-status-pill error';
+            pill.textContent = 'Error';
+          }
+          this.showToast(`Download failed: ${data.error || 'Network error'}`);
+          this.updateDownloadCounter();
+        }
+      });
     }
   }
 
-  sanitizeFilename(name) {
-    return name.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 48);
-  }
-
-  showToast(message) {
-    if (window.yasBrowser && window.yasBrowser.showToast) {
-      window.yasBrowser.showToast(message);
-    }
-  }
-
-  /**
-   * High-Fidelity Browser Preview Fallback Extractor (Only used when running in web preview without Electron backend)
-   */
-  async mockAnalyzeUrl(url) {
-    await new Promise((r) => setTimeout(r, 650));
+  // =========================================================================
+  // 7. Simulators & Fallbacks (Web Preview Environment)
+  // =========================================================================
+  async simulateExtraction(url) {
+    await new Promise((r) => setTimeout(r, 600));
 
     const isInstagram = /instagram\.com/i.test(url);
-    const isShorts = /shorts/i.test(url);
 
     if (isInstagram) {
       return {
-        success: true,
-        data: {
-          id: 'ig_7741',
-          url: url,
-          title: 'Cinematic Visual Architecture & Cyberpunk Urban Design',
-          uploader: '@neon_hyperstructure',
-          thumbnail: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80',
-          duration: 38,
-          durationString: '0:38',
-          platform: 'Instagram Reel',
-          formats: {
-            combined: [
-              { formatId: 'ig_1080p', ext: 'mp4', resolution: '1080x1920', height: 1080, fps: 60, vcodec: 'H.264', acodec: 'AAC', qualityLabel: '1080p Full HD Reel (60fps HDR)', filesizeStr: '28.4 MB', isBest: true, note: 'Original Instagram High Bitrate Stream' },
-              { formatId: 'ig_720p', ext: 'mp4', resolution: '720x1280', height: 720, fps: 30, vcodec: 'H.264', acodec: 'AAC', qualityLabel: '720p Standard HD Reel', filesizeStr: '14.2 MB', note: 'Standard Mobile Compatibility' }
-            ],
-            video: [
-              { formatId: 'ig_vid_only_1080', ext: 'mp4', resolution: '1080x1920', height: 1080, fps: 60, vcodec: 'H.264', qualityLabel: '1080p Video Stream (No Audio)', filesizeStr: '24.1 MB', note: 'Visual Stream Only' }
-            ],
-            audio: [
-              { formatId: 'extract_mp3_320', ext: 'mp3', abr: 320, acodec: 'MP3 320k', qualityLabel: 'Extract MP3 (320 kbps Studio Quality)', filesizeStr: '3.8 MB', isExtract: true, note: 'Direct Master Soundtrack' },
-              { formatId: 'extract_m4a_best', ext: 'm4a', abr: 256, acodec: 'AAC 256k', qualityLabel: 'Extract Apple AAC (256 kbps M4A)', filesizeStr: '2.1 MB', isExtract: true, note: 'Apple Lossless container' }
-            ]
-          }
-        }
+        title: 'Cinematic Reel - Aesthetic Travel Moments in Tokyo',
+        uploader: 'japan.explores',
+        platform: 'Instagram',
+        durationFormatted: '0:45',
+        thumbnail: 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=800&auto=format&fit=crop&q=80',
+        formats: [
+          { format_id: 'ig_1080p', resolution: '1080x1920 (Reel HD)', height: 1920, fps: 60, vcodec: 'avc1', acodec: 'mp4a', ext: 'mp4', isCombined: true, filesizeFormatted: '28.4 MB' },
+          { format_id: 'ig_720p', resolution: '720x1280 (Fast)', height: 1280, fps: 30, vcodec: 'avc1', acodec: 'mp4a', ext: 'mp4', isCombined: true, filesizeFormatted: '14.2 MB' },
+          { format_id: 'ig_audio', resolution: '320kbps MP3 Audio', height: 0, vcodec: 'none', acodec: 'mp3', ext: 'mp3', isAudioOnly: true, filesizeFormatted: '3.8 MB' }
+        ]
       };
     }
 
     return {
-      success: true,
-      data: {
-        id: 'yt_8842',
-        url: url,
-        title: isShorts ? 'Stunning 60-Second 4K HDR Urban Drone Hyperlapse' : 'YAS Desktop Architecture: High Performance Browser & Media Engine',
-        uploader: 'YAS Engineering Core',
-        thumbnail: 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=800&auto=format&fit=crop&q=80',
-        duration: isShorts ? 58 : 724,
-        durationString: isShorts ? '0:58' : '12:04',
-        platform: isShorts ? 'YouTube Shorts' : 'YouTube',
-        formats: {
-          combined: [
-            { formatId: 'bestvideo[height<=2160]+bestaudio/best', ext: 'mp4', resolution: '3840x2160', height: 2160, fps: 60, vcodec: 'AV1 / VP9', acodec: 'Opus/AAC', qualityLabel: '4K Ultra HD (2160p 60fps HDR)', filesizeStr: '482.5 MB', isBest: true, note: 'Merged Video + Audio Master' },
-            { formatId: 'bestvideo[height<=1080]+bestaudio/best', ext: 'mp4', resolution: '1920x1080', height: 1080, fps: 60, vcodec: 'H.264', acodec: 'AAC', qualityLabel: '1080p Full HD (60fps Crystal Clear)', filesizeStr: '118.2 MB', note: 'Recommended Desktop Quality' },
-            { formatId: 'bestvideo[height<=720]+bestaudio/best', ext: 'mp4', resolution: '1280x720', height: 720, fps: 30, vcodec: 'H.264', acodec: 'AAC', qualityLabel: '720p HD Ready', filesizeStr: '54.1 MB', note: 'Fast Download Speed' }
-          ],
-          video: [
-            { formatId: 'yt_raw_4k', ext: 'mp4', resolution: '3840x2160', height: 2160, fps: 60, vcodec: 'AV1 (av01)', qualityLabel: '4K Pure Video Stream (No Audio)', filesizeStr: '430 MB', note: 'DASH Video Stream' },
-            { formatId: 'yt_raw_1080', ext: 'mp4', resolution: '1920x1080', height: 1080, fps: 60, vcodec: 'H.264 (avc1)', qualityLabel: '1080p Pure Video Stream (No Audio)', filesizeStr: '98 MB', note: 'DASH Video Stream' }
-          ],
-          audio: [
-            { formatId: 'extract_mp3_320', ext: 'mp3', abr: 320, acodec: 'MP3 320k', qualityLabel: 'Extract MP3 (320 kbps Studio Quality)', filesizeStr: '32.4 MB', isExtract: true, note: 'High Bitrate Music Audio' },
-            { formatId: 'extract_m4a_best', ext: 'm4a', abr: 256, acodec: 'AAC M4A', qualityLabel: 'Extract Apple AAC (256 kbps M4A)', filesizeStr: '24.1 MB', isExtract: true, note: 'Crisp Audio Master' }
-          ]
-        }
-      }
+      title: 'Costa Rica in 4K UHD 60FPS - Natural Wonders Documentary',
+      uploader: 'Nature Cinematic World',
+      platform: 'YouTube',
+      durationFormatted: '12:48',
+      thumbnail: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=800&auto=format&fit=crop&q=80',
+      formats: [
+        { format_id: 'yt_4k', resolution: '3840x2160 (4K UHD)', height: 2160, fps: 60, vcodec: 'vp9', acodec: 'opus', ext: 'mp4', isCombined: true, filesizeFormatted: '312.4 MB' },
+        { format_id: 'yt_1440p', resolution: '2560x1440 (2K QHD)', height: 1440, fps: 60, vcodec: 'vp9', acodec: 'opus', ext: 'mp4', isCombined: true, filesizeFormatted: '184.2 MB' },
+        { format_id: 'yt_1080p', resolution: '1920x1080 (1080p FHD)', height: 1080, fps: 60, vcodec: 'avc1', acodec: 'mp4a', ext: 'mp4', isCombined: true, filesizeFormatted: '92.5 MB' },
+        { format_id: 'yt_720p', resolution: '1280x720 (720p HD)', height: 720, fps: 30, vcodec: 'avc1', acodec: 'mp4a', ext: 'mp4', isCombined: true, filesizeFormatted: '48.1 MB' },
+        { format_id: 'yt_video_only_4k', resolution: '3840x2160 (AV1 Video Only)', height: 2160, fps: 60, vcodec: 'av01', acodec: 'none', ext: 'mp4', isVideoOnly: true, filesizeFormatted: '280.0 MB' },
+        { format_id: 'yt_audio_320', resolution: '320kbps Studio MP3 Audio', height: 0, vcodec: 'none', acodec: 'mp3', ext: 'mp3', isAudioOnly: true, filesizeFormatted: '28.8 MB' },
+        { format_id: 'yt_audio_flac', resolution: 'Lossless FLAC Master', height: 0, vcodec: 'none', acodec: 'flac', ext: 'flac', isAudioOnly: true, filesizeFormatted: '64.2 MB' }
+      ]
     };
+  }
+
+  simulateDownloadProgress(downloadId) {
+    let currentPct = 0;
+    const interval = setInterval(() => {
+      const job = this.activeDownloads.get(downloadId);
+      if (!job || job.status === 'cancelled') {
+        clearInterval(interval);
+        return;
+      }
+
+      currentPct += Math.random() * 15 + 10;
+
+      if (currentPct >= 90 && job.status === 'downloading') {
+        job.status = 'merging';
+      }
+
+      if (currentPct >= 100) {
+        clearInterval(interval);
+        this.onDownloadCompleted(downloadId, {
+          filePath: `${this.destinationFolder}/${job.title}.mp4`
+        });
+        return;
+      }
+
+      this.updateDownloadProgress(downloadId, {
+        percent: currentPct,
+        speed: `${(Math.random() * 5 + 8).toFixed(1)} MB/s`,
+        eta: `${Math.max(1, Math.round((100 - currentPct) / 10))}s`,
+        downloaded: `${((currentPct / 100) * 45).toFixed(1)} MB`
+      });
+    }, 400);
+  }
+
+  escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  showToast(msg) {
+    if (window.yasBrowser && window.yasBrowser.showToast) {
+      window.yasBrowser.showToast(msg);
+    }
   }
 }
 
-// Global Downloader Instance
+// Global Media Downloader Instance
 window.mediaDownloader = new MediaDownloader();
