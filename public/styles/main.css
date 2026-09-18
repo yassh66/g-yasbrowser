@@ -9,25 +9,28 @@
    0. Dynamic Theme System & Custom CSS Properties
    ------------------------------------------------------------- */
 :root,
-[data-theme="electric-violet"] {
+[data-color-mode="dark"] {
+  --color-mode: "dark";
   --theme-id: "electric-violet";
-  --accent-primary: #6366f1;
-  --accent-primary-hover: #4f46e5;
-  --accent-primary-rgb: 99, 102, 241;
+  --accent-primary: #6e4bff;
+  --accent-primary-hover: #5b3ce6;
+  --accent-primary-rgb: 110, 75, 255;
   --accent-secondary: #8b5cf6;
   --accent-tertiary: #d946ef;
-  --accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%);
-  --accent-subtle-glow: rgba(99, 102, 241, 0.25);
-  --accent-highlight: rgba(99, 102, 241, 0.12);
-  --border-focus: rgba(99, 102, 241, 0.6);
-  --shadow-glow: 0 0 24px rgba(99, 102, 241, 0.35);
+  --accent-gradient: linear-gradient(135deg, #6e4bff 0%, #8b5cf6 50%, #d946ef 100%);
+  --accent-subtle-glow: rgba(110, 75, 255, 0.25);
+  --accent-highlight: rgba(110, 75, 255, 0.12);
+  --border-focus: rgba(110, 75, 255, 0.6);
+  --shadow-glow: 0 0 24px rgba(110, 75, 255, 0.35);
 
+  /* Dark mode base palette */
   --bg-base: #08090d;
   --bg-surface: #0e1017;
   --bg-elevated: #141722;
   --bg-card: #1a1e2d;
   --bg-input: #0b0d13;
   --bg-modal-backdrop: rgba(4, 5, 8, 0.88);
+  --bg-glass: rgba(14, 16, 23, 0.9);
 
   --border-subtle: #1f2334;
   --border-card: #282d42;
@@ -45,6 +48,19 @@
   --color-danger: #ef4444;
   --color-danger-bg: rgba(239, 68, 68, 0.14);
 
+  --shadow-card: 0 10px 30px rgba(0, 0, 0, 0.4);
+  --shadow-dialog: 0 30px 70px rgba(0, 0, 0, 0.75);
+  --shadow-popover: 0 16px 40px -10px rgba(0, 0, 0, 0.7);
+
+  --newtab-bg: radial-gradient(circle at 50% 25%, #181b2a 0%, #0a0c12 75%);
+  --hero-search-bg: rgba(18, 21, 31, 0.82);
+  --hero-search-border: rgba(255, 255, 255, 0.12);
+  --hero-search-shadow: 0 20px 48px -12px rgba(0, 0, 0, 0.65), 0 0 1px 1px rgba(255, 255, 255, 0.05);
+  --downloader-banner-bg: linear-gradient(135deg, rgba(var(--accent-primary-rgb), 0.14) 0%, rgba(14, 16, 24, 0.92) 100%);
+  --studio-header-bg: rgba(10, 12, 18, 0.96);
+  --studio-hero-bg: radial-gradient(ellipse at 50% 0%, rgba(var(--accent-primary-rgb), 0.09) 0%, rgba(10, 12, 18, 0.4) 80%);
+  --studio-input-bg: rgba(16, 18, 27, 0.88);
+
   --radius-xs: 4px;
   --radius-sm: 6px;
   --radius-md: 8px;
@@ -58,6 +74,66 @@
 
   --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
   --transition-normal: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* -------------------------------------------------------------
+   Light Theme System (Arc Clean & Modern Desktop Experience)
+   ------------------------------------------------------------- */
+[data-color-mode="light"] {
+  --color-mode: "light";
+
+  /* Soft light neutral backgrounds */
+  --bg-base: #f4f6fa;
+  --bg-surface: #ffffff;
+  --bg-elevated: #f8fafc;
+  --bg-card: #ffffff;
+  --bg-input: #ffffff;
+  --bg-modal-backdrop: rgba(15, 23, 42, 0.5);
+  --bg-glass: rgba(255, 255, 255, 0.95);
+
+  --border-subtle: #e2e8f0;
+  --border-card: #e2e8f0;
+  --border-elevated: #cbd5e1;
+
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-tertiary: #64748b;
+  --text-muted: #94a3b8;
+
+  --color-success: #059669;
+  --color-success-bg: rgba(5, 150, 105, 0.12);
+  --color-warning: #d97706;
+  --color-warning-bg: rgba(217, 119, 6, 0.12);
+  --color-danger: #dc2626;
+  --color-danger-bg: rgba(220, 38, 38, 0.12);
+
+  --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-dialog: 0 25px 60px -15px rgba(0, 0, 0, 0.2), 0 0 1px rgba(0, 0, 0, 0.1);
+  --shadow-popover: 0 16px 36px -8px rgba(0, 0, 0, 0.14), 0 0 1px rgba(0, 0, 0, 0.08);
+
+  --newtab-bg: radial-gradient(circle at 50% 20%, #f8fafc 0%, #eef2f6 100%);
+  --hero-search-bg: #ffffff;
+  --hero-search-border: #cbd5e1;
+  --hero-search-shadow: 0 14px 34px -8px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.04);
+  --downloader-banner-bg: linear-gradient(135deg, rgba(var(--accent-primary-rgb), 0.08) 0%, rgba(255, 255, 255, 0.96) 100%);
+  --studio-header-bg: rgba(255, 255, 255, 0.98);
+  --studio-hero-bg: radial-gradient(ellipse at 50% 0%, rgba(var(--accent-primary-rgb), 0.07) 0%, rgba(248, 250, 252, 0.8) 80%);
+  --studio-input-bg: #ffffff;
+}
+
+/* Preset Theme Accent Definitions */
+[data-theme="electric-violet"] {
+  --theme-id: "electric-violet";
+  --accent-primary: #6e4bff;
+  --accent-primary-hover: #5b3ce6;
+  --accent-primary-rgb: 110, 75, 255;
+  --accent-secondary: #8b5cf6;
+  --accent-tertiary: #d946ef;
+  --accent-gradient: linear-gradient(135deg, #6e4bff 0%, #8b5cf6 50%, #d946ef 100%);
+  --accent-subtle-glow: rgba(110, 75, 255, 0.25);
+  --accent-highlight: rgba(110, 75, 255, 0.12);
+  --border-focus: rgba(110, 75, 255, 0.6);
+  --shadow-glow: 0 0 24px rgba(110, 75, 255, 0.35);
 }
 
 [data-theme="cyber-cyan"] {
@@ -114,6 +190,48 @@
   --accent-highlight: rgba(245, 158, 11, 0.12);
   --border-focus: rgba(245, 158, 11, 0.6);
   --shadow-glow: 0 0 24px rgba(245, 158, 11, 0.35);
+}
+
+[data-theme="royal-sapphire"] {
+  --theme-id: "royal-sapphire";
+  --accent-primary: #2563eb;
+  --accent-primary-hover: #1d4ed8;
+  --accent-primary-rgb: 37, 99, 235;
+  --accent-secondary: #3b82f6;
+  --accent-tertiary: #60a5fa;
+  --accent-gradient: linear-gradient(135deg, #2563eb 0%, #3b82f6 50%, #60a5fa 100%);
+  --accent-subtle-glow: rgba(37, 99, 235, 0.25);
+  --accent-highlight: rgba(37, 99, 235, 0.12);
+  --border-focus: rgba(37, 99, 235, 0.6);
+  --shadow-glow: 0 0 24px rgba(37, 99, 235, 0.35);
+}
+
+[data-theme="neon-lime"] {
+  --theme-id: "neon-lime";
+  --accent-primary: #84cc16;
+  --accent-primary-hover: #65a30d;
+  --accent-primary-rgb: 132, 204, 22;
+  --accent-secondary: #a3e635;
+  --accent-tertiary: #10b981;
+  --accent-gradient: linear-gradient(135deg, #84cc16 0%, #a3e635 50%, #10b981 100%);
+  --accent-subtle-glow: rgba(132, 204, 22, 0.25);
+  --accent-highlight: rgba(132, 204, 22, 0.12);
+  --border-focus: rgba(132, 204, 22, 0.6);
+  --shadow-glow: 0 0 24px rgba(132, 204, 22, 0.35);
+}
+
+[data-theme="amethyst-purple"] {
+  --theme-id: "amethyst-purple";
+  --accent-primary: #a855f7;
+  --accent-primary-hover: #9333ea;
+  --accent-primary-rgb: 168, 85, 247;
+  --accent-secondary: #c084fc;
+  --accent-tertiary: #e879f9;
+  --accent-gradient: linear-gradient(135deg, #a855f7 0%, #c084fc 50%, #e879f9 100%);
+  --accent-subtle-glow: rgba(168, 85, 247, 0.25);
+  --accent-highlight: rgba(168, 85, 247, 0.12);
+  --border-focus: rgba(168, 85, 247, 0.6);
+  --shadow-glow: 0 0 24px rgba(168, 85, 247, 0.35);
 }
 
 /* -------------------------------------------------------------
@@ -2807,6 +2925,139 @@ html, body {
 .settings-divider-subtle {
   height: 1px;
   background: var(--border-subtle);
+}
+
+/* Color Mode (Dark / Light) Selection Cards in Settings */
+.mode-selector-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.mode-option-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: var(--radius-xl);
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  position: relative;
+}
+
+.mode-option-card:hover {
+  background: var(--bg-elevated);
+  border-color: var(--border-elevated);
+  transform: translateY(-1px);
+}
+
+.mode-option-card.active {
+  border-color: var(--accent-primary);
+  background: rgba(var(--accent-primary-rgb), 0.08);
+  box-shadow: 0 0 12px rgba(var(--accent-primary-rgb), 0.2);
+}
+
+.mode-preview-mini {
+  width: 48px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-card);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.mode-preview-mini.dark-mini {
+  background: #08090d;
+}
+
+.mode-preview-mini.dark-mini .mini-bar {
+  height: 8px;
+  background: #141722;
+  border-bottom: 1px solid #282d42;
+}
+
+.mode-preview-mini.dark-mini .mini-body {
+  flex: 1;
+  padding: 3px 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mode-preview-mini.dark-mini .mini-card {
+  width: 100%;
+  height: 10px;
+  background: #1a1e2d;
+  border-radius: 2px;
+  border-left: 2px solid var(--accent-primary);
+}
+
+.mode-preview-mini.light-mini {
+  background: #f4f6fa;
+}
+
+.mode-preview-mini.light-mini .mini-bar {
+  height: 8px;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.mode-preview-mini.light-mini .mini-body {
+  flex: 1;
+  padding: 3px 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mode-preview-mini.light-mini .mini-card {
+  width: 100%;
+  height: 10px;
+  background: #ffffff;
+  border-radius: 2px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+  border-left: 2px solid var(--accent-primary);
+}
+
+.mode-meta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mode-name {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.mode-desc {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+.mode-check-icon {
+  opacity: 0;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--accent-primary);
+  transition: opacity var(--transition-fast);
+}
+
+.mode-option-card.active .mode-check-icon {
+  opacity: 1;
+}
+
+.theme-mode-icon {
+  font-size: 12px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
 }
 
 .settings-section-divider {

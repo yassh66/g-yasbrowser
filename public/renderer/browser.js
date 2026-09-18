@@ -26,7 +26,8 @@ class YASBrowser {
       shieldsEnabled: true
     };
     this.bookmarks = new Set(['https://youtube.com', 'https://instagram.com', 'https://github.com']);
-    this.customAccentColor = localStorage.getItem('yas_custom_accent') || '#6366f1';
+    this.colorMode = localStorage.getItem('yas_color_mode') || 'dark';
+    this.customAccentColor = localStorage.getItem('yas_custom_accent') || '#6e4bff';
     this.currentTheme = localStorage.getItem('yas_theme') || 'electric-violet';
     this.searchEngine = localStorage.getItem('yas_search_engine') || 'google';
     this.downloadPath = localStorage.getItem('yas_download_path') || '~/Downloads';
@@ -43,6 +44,8 @@ class YASBrowser {
       tabStrip: document.getElementById('tabStrip'),
       newTabBtn: document.getElementById('newTabBtn'),
       themeSelectorBtn: document.getElementById('themeSelectorBtn'),
+      themeModeIcon: document.getElementById('themeModeIcon'),
+      themeModeLabel: document.getElementById('themeModeLabel'),
       btnOpenSettings: document.getElementById('btnOpenSettings'),
       winMinimize: document.getElementById('winMinimize'),
       winMaximize: document.getElementById('winMaximize'),
@@ -93,6 +96,8 @@ class YASBrowser {
       settingsSidebar: document.querySelector('.settings-sidebar'),
       settingsNavItems: document.querySelectorAll('.settings-nav-item'),
       settingsTabPanes: document.querySelectorAll('.settings-tab-pane'),
+      modeOptionDark: document.getElementById('modeOptionDark'),
+      modeOptionLight: document.getElementById('modeOptionLight'),
       settingsCustomColorPicker: document.getElementById('settingsCustomColorPicker'),
       settingsCustomColorHex: document.getElementById('settingsCustomColorHex'),
       customColorPreviewBubble: document.getElementById('customColorPreviewBubble'),
@@ -203,11 +208,49 @@ class YASBrowser {
     return `#${((1 << 24) + (outR << 16) + (outG << 8) + outB).toString(16).slice(1)}`;
   }
 
+  setColorMode(mode, save = true, showFeedback = false) {
+    const cleanMode = (mode === 'light') ? 'light' : 'dark';
+    this.colorMode = cleanMode;
+    document.documentElement.setAttribute('data-color-mode', cleanMode);
+    
+    if (this.dom.themeModeIcon) {
+      this.dom.themeModeIcon.textContent = cleanMode === 'light' ? '☀️' : '🌙';
+    }
+    if (this.dom.themeModeLabel) {
+      this.dom.themeModeLabel.textContent = cleanMode === 'light' ? 'Light' : 'Dark';
+    }
+    if (this.dom.themeSelectorBtn) {
+      this.dom.themeSelectorBtn.title = `Current Mode: ${cleanMode === 'light' ? 'Light' : 'Dark'} (Click to toggle • Shift+Click or Ctrl+, for Settings)`;
+    }
+    if (this.dom.modeOptionDark) {
+      this.dom.modeOptionDark.classList.toggle('active', cleanMode === 'dark');
+    }
+    if (this.dom.modeOptionLight) {
+      this.dom.modeOptionLight.classList.toggle('active', cleanMode === 'light');
+    }
+
+    if (save) {
+      localStorage.setItem('yas_color_mode', cleanMode);
+    }
+
+    if (showFeedback) {
+      this.showToast(`Switched to ${cleanMode === 'light' ? 'Light Theme ☀️' : 'Dark Theme 🌙'}`);
+    }
+  }
+
+  toggleColorMode() {
+    const nextMode = this.colorMode === 'dark' ? 'light' : 'dark';
+    this.setColorMode(nextMode, true, true);
+  }
+
   initTheme() {
-    const savedAccent = localStorage.getItem('yas_custom_accent') || '#6366f1';
+    const savedMode = localStorage.getItem('yas_color_mode') || 'dark';
+    this.setColorMode(savedMode, false, false);
+
+    const savedAccent = localStorage.getItem('yas_custom_accent') || '#6e4bff';
     const savedTheme = localStorage.getItem('yas_theme') || 'electric-violet';
     
-    if (savedTheme === 'custom' || savedAccent !== '#6366f1') {
+    if (savedTheme === 'custom' || (savedAccent !== '#6e4bff' && savedAccent !== '#6366f1')) {
       this.applyCustomAccent(savedAccent, false);
     } else {
       this.applyPresetTheme(savedTheme, savedAccent, false);
@@ -305,10 +348,30 @@ class YASBrowser {
       });
     }
 
-    // Open Theme directly from Titlebar Theme button
+    // Open Theme directly from Titlebar Theme button (Click toggles Dark/Light, Shift+Click opens Appearance Settings)
     if (this.dom.themeSelectorBtn) {
-      this.dom.themeSelectorBtn.addEventListener('click', () => {
+      this.dom.themeSelectorBtn.addEventListener('click', (e) => {
+        if (e.shiftKey || e.altKey) {
+          this.openSettings('appearance');
+        } else {
+          this.toggleColorMode();
+        }
+      });
+      this.dom.themeSelectorBtn.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
         this.openSettings('appearance');
+      });
+    }
+
+    // Color Mode (Dark vs Light) Selection Cards in Settings
+    if (this.dom.modeOptionDark) {
+      this.dom.modeOptionDark.addEventListener('click', () => {
+        this.setColorMode('dark', true, true);
+      });
+    }
+    if (this.dom.modeOptionLight) {
+      this.dom.modeOptionLight.addEventListener('click', () => {
+        this.setColorMode('light', true, true);
       });
     }
 
@@ -616,8 +679,6 @@ class YASBrowser {
       this.dom.winMinimize.addEventListener('click', () => {
         if (window.electronAPI && window.electronAPI.minimize) {
           window.electronAPI.minimize();
-        } else {
-          this.showToast('Window minimize action');
         }
       });
     }
@@ -627,8 +688,6 @@ class YASBrowser {
         if (window.electronAPI && window.electronAPI.maximize) {
           const isMax = await window.electronAPI.maximize();
           this.updateMaximizeIcon(isMax);
-        } else {
-          this.showToast('Window maximize toggled');
         }
       });
     }
@@ -637,8 +696,20 @@ class YASBrowser {
       this.dom.winClose.addEventListener('click', () => {
         if (window.electronAPI && window.electronAPI.close) {
           window.electronAPI.close();
-        } else {
-          this.showToast('Window close request');
+        }
+      });
+    }
+
+    // Double-click on top title bar / empty tab strip to toggle maximize / restore
+    if (this.dom.titlebar) {
+      this.dom.titlebar.addEventListener('dblclick', async (e) => {
+        // Only trigger if double clicking on draggable background / empty areas, not on interactive controls
+        if (e.target.closest('.tab-item, .tab-new-btn, .brand-badge, .theme-toggle-btn, .settings-nav-btn, .window-controls, .win-btn, button, input, a')) {
+          return;
+        }
+        if (window.electronAPI && window.electronAPI.maximize) {
+          const isMax = await window.electronAPI.maximize();
+          this.updateMaximizeIcon(isMax);
         }
       });
     }
@@ -1054,17 +1125,12 @@ class YASBrowser {
           };
         }
 
-        // 2. High-Priority Ad Element CSS Masking
+        // 2. High-Priority Ad Element CSS Masking (Feed & banner ads only - player overlay kept intact for skip flow)
         const styleId = 'yas-ad-suppress-style';
         if (!document.getElementById(styleId)) {
           const style = document.createElement('style');
           style.id = styleId;
           style.textContent = \`
-            .video-ads,
-            .ytp-ad-module,
-            .ytp-ad-overlay-container,
-            .ytp-ad-player-overlay,
-            .ytp-ad-player-overlay-layout,
             ytd-ad-slot-renderer,
             ytd-banner-promo-renderer,
             #masthead-ad,
@@ -1077,7 +1143,9 @@ class YASBrowser {
             ytd-promoted-sparkles-web-renderer,
             tp-yt-paper-dialog:has(#feedback),
             ytd-popup-container:has(ytd-mealbar-promo-renderer),
-            ytd-in-feed-ad-layout-renderer {
+            ytd-in-feed-ad-layout-renderer,
+            .ytp-ad-overlay-container,
+            .ytp-ad-overlay-slot {
               display: none !important;
               visibility: hidden !important;
               height: 0 !important;
@@ -1089,7 +1157,7 @@ class YASBrowser {
           (document.head || document.documentElement).appendChild(style);
         }
 
-        // 3. Fallback MutationObserver-based Skip Ad Clicker
+        // 3. Reliable Skip Ad Button Detector & Clicker
         const skipSelectors = [
           '.ytp-ad-skip-button',
           '.ytp-ad-skip-button-modern',
@@ -1098,24 +1166,63 @@ class YASBrowser {
           '.ytp-ad-skip-button-container button',
           '.ytp-ad-overlay-close-button',
           'button.ytp-ad-skip-button-modern',
-          '[id^="skip-button"] button'
+          '[id^="skip-button"] button',
+          '.ytp-ad-skip-button-text',
+          'button[class*="skip"]',
+          'button[aria-label*="Skip"]',
+          'button[aria-label*="skip"]',
+          '.ytp-ad-preview-container ~ .ytp-ad-skip-button-container button'
         ];
 
         let lastClickTime = 0;
+        function triggerSkipClick(btn) {
+          if (!btn) return false;
+          try {
+            btn.click();
+          } catch (_) {}
+          try {
+            const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window });
+            const up = new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window });
+            const click = new MouseEvent('click', { bubbles: true, cancelable: true, view: window });
+            btn.dispatchEvent(down);
+            btn.dispatchEvent(up);
+            btn.dispatchEvent(click);
+            return true;
+          } catch (_) {}
+          return true;
+        }
+
         function tryClickSkipAd() {
           const now = Date.now();
-          if (now - lastClickTime < 300) return;
+          if (now - lastClickTime < 250) return;
 
+          // Check selector matches
           for (const sel of skipSelectors) {
             const buttons = document.querySelectorAll(sel);
             for (const btn of buttons) {
-              if (btn && typeof btn.click === 'function') {
+              if (btn) {
                 const rect = btn.getBoundingClientRect();
-                if (rect.width > 0 && rect.height > 0) {
-                  btn.click();
+                const style = window.getComputedStyle ? window.getComputedStyle(btn) : null;
+                const isHidden = style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0');
+                if (!isHidden && (rect.width > 0 || btn.offsetParent !== null)) {
+                  triggerSkipClick(btn);
                   lastClickTime = now;
                   return;
                 }
+              }
+            }
+          }
+
+          // Check all buttons inside player for "Skip" text
+          const player = document.querySelector('.html5-video-player');
+          if (player) {
+            const allButtons = player.querySelectorAll('button, div[role="button"]');
+            for (const b of allButtons) {
+              const text = (b.innerText || b.textContent || b.getAttribute('aria-label') || '').trim();
+              if (/^skip\b/i.test(text) || /skip ad/i.test(text) || /skip ads/i.test(text)) {
+                triggerSkipClick(b);
+                lastClickTime = now;
+                return;
               }
             }
           }
@@ -1124,7 +1231,7 @@ class YASBrowser {
         // Initialize MutationObserver on player/DOM if not already running
         if (!window.__yasAdObserver) {
           const observer = new MutationObserver(function(mutations) {
-            const isAdActive = document.querySelector('.ad-showing, .ad-interrupting, .ytp-ad-player-overlay');
+            const isAdActive = document.querySelector('.ad-showing, .ad-interrupting, .ytp-ad-player-overlay, .ytp-ad-module');
             if (isAdActive) {
               tryClickSkipAd();
             }
@@ -1142,11 +1249,11 @@ class YASBrowser {
         // Periodic heartbeat check in case mutations settle while ad is playing
         if (!window.__yasAdInterval) {
           window.__yasAdInterval = setInterval(function() {
-            const isAdActive = document.querySelector('.ad-showing, .ad-interrupting, .ytp-ad-player-overlay');
+            const isAdActive = document.querySelector('.ad-showing, .ad-interrupting, .ytp-ad-player-overlay, .ytp-ad-module');
             if (isAdActive) {
               tryClickSkipAd();
             }
-          }, 1000);
+          }, 500);
         }
       })();
     `;
@@ -1813,6 +1920,9 @@ class YASBrowser {
       } else if (isCmdOrCtrl && e.key === ',') {
         e.preventDefault();
         this.openSettings('appearance');
+      } else if (isCmdOrCtrl && e.shiftKey && (e.key.toLowerCase() === 'd' || e.key.toLowerCase() === 'l')) {
+        e.preventDefault();
+        this.toggleColorMode();
       } else if (isCmdOrCtrl && e.key.toLowerCase() === 'r') {
         e.preventDefault();
         this.reloadCurrentTab();

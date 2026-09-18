@@ -26,7 +26,8 @@ class YASBrowser {
       shieldsEnabled: true
     };
     this.bookmarks = new Set(['https://youtube.com', 'https://instagram.com', 'https://github.com']);
-    this.customAccentColor = localStorage.getItem('yas_custom_accent') || '#6366f1';
+    this.colorMode = localStorage.getItem('yas_color_mode') || 'dark';
+    this.customAccentColor = localStorage.getItem('yas_custom_accent') || '#6e4bff';
     this.currentTheme = localStorage.getItem('yas_theme') || 'electric-violet';
     this.searchEngine = localStorage.getItem('yas_search_engine') || 'google';
     this.downloadPath = localStorage.getItem('yas_download_path') || '~/Downloads';
@@ -43,6 +44,8 @@ class YASBrowser {
       tabStrip: document.getElementById('tabStrip'),
       newTabBtn: document.getElementById('newTabBtn'),
       themeSelectorBtn: document.getElementById('themeSelectorBtn'),
+      themeModeIcon: document.getElementById('themeModeIcon'),
+      themeModeLabel: document.getElementById('themeModeLabel'),
       btnOpenSettings: document.getElementById('btnOpenSettings'),
       winMinimize: document.getElementById('winMinimize'),
       winMaximize: document.getElementById('winMaximize'),
@@ -93,6 +96,8 @@ class YASBrowser {
       settingsSidebar: document.querySelector('.settings-sidebar'),
       settingsNavItems: document.querySelectorAll('.settings-nav-item'),
       settingsTabPanes: document.querySelectorAll('.settings-tab-pane'),
+      modeOptionDark: document.getElementById('modeOptionDark'),
+      modeOptionLight: document.getElementById('modeOptionLight'),
       settingsCustomColorPicker: document.getElementById('settingsCustomColorPicker'),
       settingsCustomColorHex: document.getElementById('settingsCustomColorHex'),
       customColorPreviewBubble: document.getElementById('customColorPreviewBubble'),
@@ -203,11 +208,45 @@ class YASBrowser {
     return `#${((1 << 24) + (outR << 16) + (outG << 8) + outB).toString(16).slice(1)}`;
   }
 
+  setColorMode(mode, save = true) {
+    const cleanMode = (mode === 'light') ? 'light' : 'dark';
+    this.colorMode = cleanMode;
+    document.documentElement.setAttribute('data-color-mode', cleanMode);
+    
+    if (this.dom.themeModeIcon) {
+      this.dom.themeModeIcon.textContent = cleanMode === 'light' ? '☀️' : '🌙';
+    }
+    if (this.dom.themeModeLabel) {
+      this.dom.themeModeLabel.textContent = cleanMode === 'light' ? 'Light' : 'Dark';
+    }
+    if (this.dom.themeSelectorBtn) {
+      this.dom.themeSelectorBtn.title = `Current Mode: ${cleanMode === 'light' ? 'Light' : 'Dark'} (Click to toggle • Shift+Click or Ctrl+, for Settings)`;
+    }
+    if (this.dom.modeOptionDark) {
+      this.dom.modeOptionDark.classList.toggle('active', cleanMode === 'dark');
+    }
+    if (this.dom.modeOptionLight) {
+      this.dom.modeOptionLight.classList.toggle('active', cleanMode === 'light');
+    }
+
+    if (save) {
+      localStorage.setItem('yas_color_mode', cleanMode);
+    }
+  }
+
+  toggleColorMode() {
+    const nextMode = this.colorMode === 'dark' ? 'light' : 'dark';
+    this.setColorMode(nextMode, true);
+  }
+
   initTheme() {
-    const savedAccent = localStorage.getItem('yas_custom_accent') || '#6366f1';
+    const savedMode = localStorage.getItem('yas_color_mode') || 'dark';
+    this.setColorMode(savedMode, false, false);
+
+    const savedAccent = localStorage.getItem('yas_custom_accent') || '#6e4bff';
     const savedTheme = localStorage.getItem('yas_theme') || 'electric-violet';
     
-    if (savedTheme === 'custom' || savedAccent !== '#6366f1') {
+    if (savedTheme === 'custom' || (savedAccent !== '#6e4bff' && savedAccent !== '#6366f1')) {
       this.applyCustomAccent(savedAccent, false);
     } else {
       this.applyPresetTheme(savedTheme, savedAccent, false);
@@ -305,10 +344,30 @@ class YASBrowser {
       });
     }
 
-    // Open Theme directly from Titlebar Theme button
+    // Open Theme directly from Titlebar Theme button (Click toggles Dark/Light, Shift+Click opens Appearance Settings)
     if (this.dom.themeSelectorBtn) {
-      this.dom.themeSelectorBtn.addEventListener('click', () => {
+      this.dom.themeSelectorBtn.addEventListener('click', (e) => {
+        if (e.shiftKey || e.altKey) {
+          this.openSettings('appearance');
+        } else {
+          this.toggleColorMode();
+        }
+      });
+      this.dom.themeSelectorBtn.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
         this.openSettings('appearance');
+      });
+    }
+
+    // Color Mode (Dark vs Light) Selection Cards in Settings
+    if (this.dom.modeOptionDark) {
+      this.dom.modeOptionDark.addEventListener('click', () => {
+        this.setColorMode('dark', true);
+      });
+    }
+    if (this.dom.modeOptionLight) {
+      this.dom.modeOptionLight.addEventListener('click', () => {
+        this.setColorMode('light', true);
       });
     }
 
@@ -1857,6 +1916,9 @@ class YASBrowser {
       } else if (isCmdOrCtrl && e.key === ',') {
         e.preventDefault();
         this.openSettings('appearance');
+      } else if (isCmdOrCtrl && e.shiftKey && (e.key.toLowerCase() === 'd' || e.key.toLowerCase() === 'l')) {
+        e.preventDefault();
+        this.toggleColorMode();
       } else if (isCmdOrCtrl && e.key.toLowerCase() === 'r') {
         e.preventDefault();
         this.reloadCurrentTab();

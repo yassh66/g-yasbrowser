@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>YAS Browser</title>
-    <meta name="description" content="A modern, high-performance dark-themed desktop browser foundation with an integrated media downloader for YouTube and Instagram." />
+    <meta name="description" content="A modern, high-performance desktop browser with light & dark themes, custom accent studio, ad-blocking shields, and integrated media downloader." />
     <meta property="og:title" content="YAS Browser" />
-    <meta property="og:description" content="A modern, high-performance dark-themed desktop browser foundation with an integrated media downloader for YouTube and Instagram." />
+    <meta property="og:description" content="A modern, high-performance desktop browser with light & dark themes, custom accent studio, ad-blocking shields, and integrated media downloader." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
 
@@ -42,10 +42,11 @@
         </div>
 
         <div class="titlebar-right">
-          <!-- Theme Quick Button -->
-          <button class="theme-toggle-btn" id="themeSelectorBtn" title="Choose UI Accent Theme & Colors (Ctrl+,)">
+          <!-- Theme Quick Mode Toggle & Appearance Button -->
+          <button class="theme-toggle-btn" id="themeSelectorBtn" title="Toggle Dark / Light Theme (Click) • Theme & Colors (Ctrl+,)">
+            <span class="theme-mode-icon" id="themeModeIcon">🌙</span>
             <span class="theme-swatch-preview"></span>
-            <span class="theme-label-text">Theme</span>
+            <span class="theme-label-text" id="themeModeLabel">Dark</span>
           </button>
 
           <!-- Settings Button -->
@@ -635,7 +636,42 @@
               <div class="settings-tab-pane active" id="paneSettingsAppearance">
                 <div class="settings-pane-heading">
                   <h2>Appearance & Theme</h2>
-                  <p>Customize the browser's theme with exact custom colors or choose from curated luxury palettes.</p>
+                  <p>Customize the browser with instant Dark/Light mode switching and custom accent colors.</p>
+                </div>
+
+                <!-- Theme Color Mode (Dark vs Light) Selection -->
+                <div class="settings-card">
+                  <div class="settings-card-header">
+                    <div>
+                      <h3 class="card-title">Color Mode</h3>
+                      <p class="card-desc">Choose between deep Dark atmosphere and clean Arc-inspired Light mode.</p>
+                    </div>
+                  </div>
+                  <div class="mode-selector-grid">
+                    <div class="mode-option-card active" id="modeOptionDark" data-mode="dark">
+                      <div class="mode-preview-mini dark-mini">
+                        <div class="mini-bar"></div>
+                        <div class="mini-body"><div class="mini-card"></div></div>
+                      </div>
+                      <div class="mode-meta">
+                        <div class="mode-name">Dark Mode</div>
+                        <div class="mode-desc">Deep modern dark atmosphere</div>
+                      </div>
+                      <div class="mode-check-icon">✓</div>
+                    </div>
+
+                    <div class="mode-option-card" id="modeOptionLight" data-mode="light">
+                      <div class="mode-preview-mini light-mini">
+                        <div class="mini-bar"></div>
+                        <div class="mini-body"><div class="mini-card"></div></div>
+                      </div>
+                      <div class="mode-meta">
+                        <div class="mode-name">Light Mode</div>
+                        <div class="mode-desc">Arc-style soft neutral daylight</div>
+                      </div>
+                      <div class="mode-check-icon">✓</div>
+                    </div>
+                  </div>
                 </div>
 
                 <!-- Live Color Picker Studio Card -->
