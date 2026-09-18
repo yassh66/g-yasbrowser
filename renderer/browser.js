@@ -304,33 +304,19 @@ class YASBrowser {
     }
   }
 
-  applyPresetTheme(presetId, colorHex, showFeedback = true) {
+  applyPresetTheme(presetId, colorHex) {
     this.currentTheme = presetId;
     document.documentElement.setAttribute('data-theme', presetId);
     localStorage.setItem('yas_theme', presetId);
     
-    // Also calculate variables so all UI parts match
-    this.applyCustomAccent(colorHex, true);
+    // Also calculate variables so all UI parts match without overriding theme name
+    this.applyCustomAccent(colorHex, false);
 
     // Update active highlight in preset cards
     document.querySelectorAll('.preset-theme-card').forEach((card) => {
       const isSelected = card.dataset.presetId === presetId || (card.dataset.color && card.dataset.color.toLowerCase() === colorHex.toLowerCase());
       card.classList.toggle('active', Boolean(isSelected));
     });
-
-    if (showFeedback) {
-      const presetNames = {
-        'electric-violet': 'Electric Violet (Arc Signature)',
-        'cyber-cyan': 'Cyber Cyan (Brave Neon)',
-        'sunset-rose': 'Sunset Rose',
-        'emerald-matrix': 'Emerald Matrix',
-        'obsidian-amber': 'Obsidian Amber',
-        'royal-sapphire': 'Royal Sapphire',
-        'neon-lime': 'Neon Lime',
-        'amethyst-purple': 'Amethyst Velvet'
-      };
-      this.showToast(`Theme applied: ${presetNames[presetId] || presetId}`);
-    }
   }
 
   // =========================================================================
@@ -437,7 +423,7 @@ class YASBrowser {
     // Reset Default Theme Button
     if (this.dom.btnResetThemeDefault) {
       this.dom.btnResetThemeDefault.addEventListener('click', () => {
-        this.applyPresetTheme('electric-violet', '#6366f1', true);
+        this.applyPresetTheme('electric-violet', '#6366f1');
       });
     }
 
@@ -447,7 +433,7 @@ class YASBrowser {
         const presetId = card.dataset.presetId;
         const color = card.dataset.color || '#6366f1';
         if (presetId) {
-          this.applyPresetTheme(presetId, color, true);
+          this.applyPresetTheme(presetId, color);
         }
       });
     });
