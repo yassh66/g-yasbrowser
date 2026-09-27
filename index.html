@@ -447,6 +447,7 @@
               <div class="error-actions-row">
                 <button class="btn-error-retry" id="btnErrorRetry">Try Again</button>
                 <button class="btn-error-help" id="btnErrorGuide">Installation & Setup Guide</button>
+                <button class="btn-error-logs" id="btnErrorLogs">🔍 View Troubleshooting Logs</button>
               </div>
             </div>
 
@@ -1052,6 +1053,49 @@
               </div>
             </div>
 
+            <!-- Browser Cookie Bridge Card -->
+            <div class="diag-card cookie-bridge-card">
+              <div class="diag-card-top">
+                <div class="cookie-card-title-group">
+                  <span class="cookie-card-icon">🍪</span>
+                  <span class="diag-name">Browser Cookie Bridge (Anti-Bot Bypass)</span>
+                </div>
+                <span class="diag-status-pill installed" id="cookieBridgeStatusPill">Auto-Connected</span>
+              </div>
+              <div class="cookie-browsers-list" id="cookieBrowsersList">
+                <span class="cookie-browser-badge" data-browser="edge">Edge <span class="badge-check">✓</span></span>
+                <span class="cookie-browser-badge" data-browser="chrome">Chrome <span class="badge-check">✓</span></span>
+                <span class="cookie-browser-badge" data-browser="brave">Brave <span class="badge-check">✓</span></span>
+                <span class="cookie-browser-badge" data-browser="firefox">Firefox <span class="badge-check">✓</span></span>
+              </div>
+              <div class="cookie-card-desc" id="cookieBridgeDesc">
+                Active Source: <strong id="activeCookieBrowserText">Microsoft Edge (Auto)</strong> • Used automatically when YouTube or Instagram requests bot verification.
+              </div>
+            </div>
+
+            <!-- Troubleshooting & Live Activity Logs (Collapsible Debug Section) -->
+            <div class="diag-logs-section" id="diagLogsSection">
+              <div class="diag-logs-header" id="toggleDiagLogs">
+                <div class="diag-logs-title-group">
+                  <span class="diag-logs-icon" id="diagLogsToggleIcon">▶</span>
+                  <span class="diag-logs-title">Troubleshooting & Diagnostics Logs (Debug)</span>
+                </div>
+                <span class="diag-logs-badge" id="diagLogsCountBadge">0 events</span>
+              </div>
+              <div class="diag-logs-body" id="diagLogsBody" style="display: none;">
+                <div class="diag-logs-toolbar">
+                  <span class="diag-logs-subtitle">Real-time anti-bot, stream extraction & multiplexing audit log</span>
+                  <div class="diag-logs-actions">
+                    <button class="btn-log-action" id="btnCopyDiagLogs" title="Copy logs to clipboard">📋 Copy Logs</button>
+                    <button class="btn-log-action" id="btnClearDiagLogs" title="Clear log buffer">🗑 Clear</button>
+                  </div>
+                </div>
+                <div class="diag-logs-viewer custom-scrollbar" id="diagLogsViewer">
+                  <div class="log-empty-msg">No extraction events recorded yet. Analyze or download a media stream to see live diagnostic traces.</div>
+                </div>
+              </div>
+            </div>
+
             <!-- Installation Instructions -->
             <div class="install-guide-box">
               <div class="guide-tabs-bar">
@@ -1074,12 +1118,24 @@
               </div>
             </div>
 
+            <div class="engine-selftest-container" id="engineSelfTestContainer" style="display: none;">
+              <div class="selftest-header">
+                <span class="selftest-title">🧪 Engine Health Check & Self-Test Report</span>
+                <span class="selftest-badge" id="selfTestOverallBadge">PASS</span>
+              </div>
+              <div class="selftest-summary" id="selfTestSummaryText">All systems operational.</div>
+              <div class="selftest-grid" id="selfTestGrid">
+                <!-- Injected via JavaScript -->
+              </div>
+            </div>
+
             <div class="engine-modal-note">
               💡 <strong>Note:</strong> YAS Browser automatically falls back to its built-in high-speed stream extractor if local binaries are not yet configured.
             </div>
           </div>
 
           <div class="engine-modal-footer">
+            <button class="btn-diag-selftest" id="btnRunEngineSelfTest">⚡ Run Health Self-Test</button>
             <button class="btn-diag-rescan" id="btnRescanDependencies">🔄 Re-scan Binaries</button>
             <button class="btn-diag-done" id="btnDiagDone">Done</button>
           </div>

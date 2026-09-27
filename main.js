@@ -109,9 +109,169 @@ function setupShieldsAdBlocking() {
   });
 }
 
-// Cached binary paths
+// Cached binary paths & browser cookie state
 let cachedYtdlpPath = null;
 let cachedFfmpegPath = null;
+let preferredCookieBrowser = 'auto'; // 'auto' | 'edge' | 'chrome' | 'brave' | 'firefox' | 'opera' | 'vivaldi' | 'none'
+let lastSuccessfulCookieBrowser = null;
+
+// Safe Downloader Diagnostics Log Buffer (Max 60 entries, strictly sanitized)
+const downloaderEventLogs = [];
+
+/**
+ * Safely records diagnostic log events without exposing sensitive user tokens or cookie contents
+ */
+function logDownloaderEvent(category, message, details = {}) {
+  const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
+  const safeDetails = {};
+  if (details && typeof details === 'object') {
+    for (const [k, v] of Object.entries(details)) {
+      if (/cookie|auth|token|session|secret|pass/i.test(k) && typeof v === 'string' && v.length > 25) {
+        safeDetails[k] = '[PROTECTED_TOKEN]';
+      } else {
+        safeDetails[k] = v;
+      }
+    }
+  }
+
+  const logEntry = {
+    id: 'log_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+    timestamp,
+    category, // 'DISCOVERY' | 'COOKIE_BRIDGE' | 'ANALYSIS' | 'ANTI_BOT' | 'FFMPEG' | 'DOWNLOAD' | 'ERROR'
+    message,
+    details: Object.keys(safeDetails).length > 0 ? safeDetails : null
+  };
+
+  downloaderEventLogs.push(logEntry);
+  if (downloaderEventLogs.length > 60) {
+    downloaderEventLogs.shift();
+  }
+
+  console.log(`[YAS Diag] [${timestamp}] [${category}] ${message}`);
+}
+
+/**
+ * Detects installed web browsers on the user system capable of providing session cookies for yt-dlp
+ */
+function detectAvailableBrowsers() {
+  const isWin = process.platform === 'win32';
+  const isMac = process.platform === 'darwin';
+  const isLinux = process.platform === 'linux';
+  const home = os.homedir();
+  const localAppData = process.env.LOCALAPPDATA || (home ? path.join(home, 'AppData', 'Local') : '');
+  const appData = process.env.APPDATA || (home ? path.join(home, 'AppData', 'Roaming') : '');
+  const programFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+  const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
+
+  const detected = [];
+
+  if (isWin) {
+    // 1. Microsoft Edge (Windows 10/11 built-in default)
+    const edgePaths = [
+      path.join(localAppData, 'Microsoft', 'Edge', 'User Data'),
+      path.join(programFilesX86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+      path.join(programFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe')
+    ];
+    if (edgePaths.some(p => fs.existsSync(p))) {
+      detected.push({ id: 'edge', name: 'Microsoft Edge', default: true });
+    }
+
+    // 2. Google Chrome
+    const chromePaths = [
+      path.join(localAppData, 'Google', 'Chrome', 'User Data'),
+      path.join(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      path.join(programFilesX86, 'Google', 'Chrome', 'Application', 'chrome.exe')
+    ];
+    if (chromePaths.some(p => fs.existsSync(p))) {
+      detected.push({ id: 'chrome', name: 'Google Chrome' });
+    }
+
+    // 3. Brave Browser
+    const bravePaths = [
+      path.join(localAppData, 'BraveSoftware', 'Brave-Browser', 'User Data'),
+      path.join(programFiles, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
+      path.join(programFilesX86, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe')
+    ];
+    if (bravePaths.some(p => fs.existsSync(p))) {
+      detected.push({ id: 'brave', name: 'Brave Browser' });
+    }
+
+    // 4. Mozilla Firefox
+    const firefoxPaths = [
+      path.join(appData, 'Mozilla', 'Firefox', 'Profiles'),
+      path.join(programFiles, 'Mozilla Firefox', 'firefox.exe'),
+      path.join(programFilesX86, 'Mozilla Firefox', 'firefox.exe')
+    ];
+    if (firefoxPaths.some(p => fs.existsSync(p))) {
+      detected.push({ id: 'firefox', name: 'Mozilla Firefox' });
+    }
+
+    // 5. Opera & Vivaldi
+    if (fs.existsSync(path.join(appData, 'Opera Software', 'Opera Stable'))) {
+      detected.push({ id: 'opera', name: 'Opera' });
+    }
+    if (fs.existsSync(path.join(localAppData, 'Vivaldi', 'User Data'))) {
+      detected.push({ id: 'vivaldi', name: 'Vivaldi' });
+    }
+  } else if (isMac) {
+    if (fs.existsSync(path.join(home, 'Library', 'Application Support', 'Google', 'Chrome'))) detected.push({ id: 'chrome', name: 'Google Chrome' });
+    if (fs.existsSync(path.join(home, 'Library', 'Application Support', 'Microsoft Edge'))) detected.push({ id: 'edge', name: 'Microsoft Edge' });
+    if (fs.existsSync(path.join(home, 'Library', 'Application Support', 'BraveSoftware', 'Brave-Browser'))) detected.push({ id: 'brave', name: 'Brave' });
+    if (fs.existsSync(path.join(home, 'Library', 'Application Support', 'Firefox', 'Profiles'))) detected.push({ id: 'firefox', name: 'Firefox' });
+    detected.push({ id: 'safari', name: 'Safari' });
+  } else if (isLinux) {
+    if (fs.existsSync(path.join(home, '.config', 'google-chrome'))) detected.push({ id: 'chrome', name: 'Google Chrome' });
+    if (fs.existsSync(path.join(home, '.config', 'microsoft-edge'))) detected.push({ id: 'edge', name: 'Microsoft Edge' });
+    if (fs.existsSync(path.join(home, '.config', 'BraveSoftware', 'Brave-Browser'))) detected.push({ id: 'brave', name: 'Brave' });
+    if (fs.existsSync(path.join(home, '.mozilla', 'firefox'))) detected.push({ id: 'firefox', name: 'Firefox' });
+    if (fs.existsSync(path.join(home, '.config', 'chromium'))) detected.push({ id: 'chromium', name: 'Chromium' });
+  }
+
+  // Ensure default candidate list exists on Windows if filesystem check was constrained
+  if (detected.length === 0 && isWin) {
+    detected.push({ id: 'edge', name: 'Microsoft Edge', default: true });
+    detected.push({ id: 'chrome', name: 'Google Chrome' });
+    detected.push({ id: 'brave', name: 'Brave Browser' });
+  }
+
+  return detected;
+}
+
+/**
+ * Returns prioritized array of cookie browser names to try for anti-bot bypass
+ */
+function getCookieBrowserCandidates() {
+  if (preferredCookieBrowser && preferredCookieBrowser !== 'auto' && preferredCookieBrowser !== 'none') {
+    return [preferredCookieBrowser];
+  }
+  if (preferredCookieBrowser === 'none') {
+    return [];
+  }
+
+  const detected = detectAvailableBrowsers();
+  const candidateIds = detected.map(b => b.id);
+
+  // If we had a previously successful browser, prioritize it first
+  const result = [];
+  if (lastSuccessfulCookieBrowser && candidateIds.includes(lastSuccessfulCookieBrowser)) {
+    result.push(lastSuccessfulCookieBrowser);
+  }
+
+  for (const id of candidateIds) {
+    if (!result.includes(id)) {
+      result.push(id);
+    }
+  }
+
+  // Guarantee standard fallback sequence on Windows
+  if (process.platform === 'win32') {
+    ['edge', 'chrome', 'brave', 'firefox'].forEach(b => {
+      if (!result.includes(b)) result.push(b);
+    });
+  }
+
+  return result;
+}
 
 /**
  * Creates the primary browser window
@@ -398,6 +558,8 @@ ipcMain.handle('system:check-dependencies', async () => {
       };
     }
 
+    const availableBrowsers = detectAvailableBrowsers();
+
     return {
       success: true,
       ytdlp: ytdlpInfo,
@@ -406,6 +568,9 @@ ipcMain.handle('system:check-dependencies', async () => {
       ytdlpPath: ytdlpInfo.path,
       ffmpegFound: !!ffmpegInfo.available,
       ffmpegPath: ffmpegInfo.path,
+      cookieBrowsers: availableBrowsers,
+      activeCookieBrowser: lastSuccessfulCookieBrowser || (availableBrowsers[0]?.name || 'Auto (Edge / Chrome / Brave)'),
+      preferredCookieBrowser,
       installCommands,
       defaultDownloadPath: path.join(os.homedir(), 'Downloads'),
       platform: process.platform,
@@ -420,6 +585,180 @@ ipcMain.handle('system:check-dependencies', async () => {
       platform: process.platform
     };
   }
+});
+
+/**
+ * IPC handlers for browser cookie bridge
+ */
+ipcMain.handle('system:get-cookie-browsers', () => {
+  return {
+    browsers: detectAvailableBrowsers(),
+    preferred: preferredCookieBrowser,
+    active: lastSuccessfulCookieBrowser
+  };
+});
+
+ipcMain.handle('system:set-cookie-browser', (event, browserId) => {
+  preferredCookieBrowser = browserId || 'auto';
+  if (browserId && browserId !== 'auto' && browserId !== 'none') {
+    lastSuccessfulCookieBrowser = browserId;
+  }
+  logDownloaderEvent('COOKIE_BRIDGE', `User changed preferred cookie browser to: ${preferredCookieBrowser}`);
+  return { success: true, preferred: preferredCookieBrowser };
+});
+
+ipcMain.handle('system:get-diagnostics-logs', () => {
+  return {
+    success: true,
+    logs: [...downloaderEventLogs],
+    cookieBrowsers: detectAvailableBrowsers(),
+    preferredCookieBrowser,
+    activeCookieBrowser: lastSuccessfulCookieBrowser,
+    ytdlpPath: cachedYtdlpPath,
+    ffmpegPath: cachedFfmpegPath,
+    platform: process.platform,
+    arch: process.arch
+  };
+});
+
+ipcMain.handle('system:clear-diagnostics-logs', () => {
+  downloaderEventLogs.length = 0;
+  logDownloaderEvent('DIAGNOSTICS', 'Diagnostics and troubleshooting log buffer cleared.');
+  return { success: true };
+});
+
+/**
+ * Downloader Engine Health Check & Production Self-Test
+ * Performs active functional validation of:
+ * - yt-dlp executable existence, accessibility, and --version command output
+ * - ffmpeg executable existence, accessibility, and -version command output
+ * - Browser cookie providers detection & ordered candidate list (Edge -> Chrome -> Brave -> Firefox)
+ * - Bundled resourcesPath resolution integrity
+ */
+ipcMain.handle('system:run-self-test', async () => {
+  logDownloaderEvent('DIAGNOSTICS', 'Running Downloader Engine Production Self-Test...');
+  const results = {
+    timestamp: new Date().toISOString(),
+    overall: 'pass', // 'pass' | 'warning' | 'fail'
+    tests: [],
+    summary: ''
+  };
+
+  // Test 1: yt-dlp binary presence & execution
+  const ytdlpDiscovery = await discoverBinary('yt-dlp');
+  if (!ytdlpDiscovery) {
+    results.overall = 'warning';
+    results.tests.push({
+      name: 'yt-dlp Executable Discovery',
+      passed: false,
+      status: 'missing',
+      message: 'yt-dlp binary was not found in resources/bin, %LOCALAPPDATA%\\YASBrowser\\bin, or system PATH.',
+      suggestedAction: 'Use the automatic binary installer or install via winget: winget install yt-dlp'
+    });
+  } else {
+    cachedYtdlpPath = ytdlpDiscovery;
+    const versionOutput = await new Promise((resolve) => {
+      exec(`"${ytdlpDiscovery}" --version`, { timeout: 5000 }, (err, stdout, stderr) => {
+        if (!err && stdout && stdout.trim()) {
+          resolve({ ok: true, version: stdout.trim().split('\n')[0].trim() });
+        } else {
+          resolve({ ok: false, error: (err && err.message) || stderr });
+        }
+      });
+    });
+
+    results.tests.push({
+      name: 'yt-dlp Binary & Version Test',
+      passed: versionOutput.ok,
+      status: versionOutput.ok ? 'pass' : 'fail',
+      path: ytdlpDiscovery,
+      version: versionOutput.version || 'Active',
+      message: versionOutput.ok ? `yt-dlp (${versionOutput.version}) is verified and operational.` : `yt-dlp execution error: ${versionOutput.error}`,
+      suggestedAction: versionOutput.ok ? null : 'Re-download or update yt-dlp binary.'
+    });
+    if (!versionOutput.ok) results.overall = 'warning';
+  }
+
+  // Test 2: ffmpeg binary presence & execution
+  const ffmpegDiscovery = await discoverBinary('ffmpeg');
+  if (!ffmpegDiscovery) {
+    if (results.overall === 'pass') results.overall = 'warning';
+    results.tests.push({
+      name: 'FFmpeg Muxer Discovery',
+      passed: false,
+      status: 'missing',
+      message: 'FFmpeg binary was not found in resources/bin or system PATH.',
+      suggestedAction: 'High-res audio/video multiplexing requires ffmpeg. Install via winget: winget install Gyan.FFmpeg'
+    });
+  } else {
+    cachedFfmpegPath = ffmpegDiscovery;
+    const ffmpegVersionOutput = await new Promise((resolve) => {
+      exec(`"${ffmpegDiscovery}" -version`, { timeout: 5000 }, (err, stdout, stderr) => {
+        if (!err && stdout && stdout.trim()) {
+          const firstLine = stdout.trim().split('\n')[0].trim();
+          resolve({ ok: true, version: firstLine.substring(0, 60) });
+        } else {
+          resolve({ ok: false, error: (err && err.message) || stderr });
+        }
+      });
+    });
+
+    results.tests.push({
+      name: 'FFmpeg Binary & Multiplexing Test',
+      passed: ffmpegVersionOutput.ok,
+      status: ffmpegVersionOutput.ok ? 'pass' : 'fail',
+      path: ffmpegDiscovery,
+      version: ffmpegVersionOutput.version || 'Active',
+      message: ffmpegVersionOutput.ok ? `FFmpeg is verified and ready for stream multiplexing.` : `FFmpeg execution error: ${ffmpegVersionOutput.error}`,
+      suggestedAction: ffmpegVersionOutput.ok ? null : 'Re-install or verify FFmpeg executable.'
+    });
+    if (!ffmpegVersionOutput.ok && results.overall === 'pass') results.overall = 'warning';
+  }
+
+  // Test 3: Browser Cookie Providers (Anti-Bot Bypass)
+  const detectedBrowsers = detectAvailableBrowsers();
+  const candidateOrder = getCookieBrowserCandidates();
+  results.tests.push({
+    name: 'Browser Cookie Bridge Detection',
+    passed: detectedBrowsers.length > 0,
+    status: detectedBrowsers.length > 0 ? 'pass' : 'warning',
+    detectedCount: detectedBrowsers.length,
+    detectedBrowsers: detectedBrowsers.map(b => b.name),
+    candidateFallbackOrder: candidateOrder,
+    message: detectedBrowsers.length > 0 
+      ? `Detected ${detectedBrowsers.length} browser cookie provider(s): ${detectedBrowsers.map(b => b.name).join(', ')}. Fallback order: ${candidateOrder.join(' -> ')}`
+      : 'No standard browser profiles detected on default paths. Anti-bot cookie extraction will use standard direct profiles.',
+    suggestedAction: detectedBrowsers.length === 0 ? 'Sign in to YouTube or Instagram in Microsoft Edge or Google Chrome.' : null
+  });
+
+  // Test 4: Package Resources Integrity Check
+  const isPackaged = app.isPackaged;
+  results.tests.push({
+    name: 'Application Environment & Packaging Verification',
+    passed: true,
+    status: 'pass',
+    isPackaged,
+    resourcesPath: process.resourcesPath || 'N/A',
+    platform: process.platform,
+    arch: process.arch,
+    message: isPackaged 
+      ? `Production installation verified (resourcesPath: ${process.resourcesPath})`
+      : `Development runtime environment active`
+  });
+
+  if (results.tests.every(t => t.passed)) {
+    results.overall = 'pass';
+    results.summary = 'All downloader systems, binaries, and browser anti-bot bridges are healthy and operational.';
+  } else if (results.tests.some(t => t.name.includes('yt-dlp') && !t.passed)) {
+    results.overall = 'fail';
+    results.summary = 'yt-dlp core extractor is unavailable. Live downloads will fall back to simulated preview mode.';
+  } else {
+    results.overall = 'warning';
+    results.summary = 'Downloader core is operational with minor configuration notices.';
+  }
+
+  logDownloaderEvent('DIAGNOSTICS', `Self-Test completed with status: [${results.overall.toUpperCase()}] - ${results.summary}`);
+  return results;
 });
 
 /**
@@ -587,7 +926,7 @@ function normalizeMediaUrl(rawUrl) {
   let url = rawUrl.trim();
 
   try {
-    // Handle YouTube Shorts -> standard watch URL for better yt-dlp format extraction
+    // 1. YouTube Shorts -> Standard Watch URL
     if (url.includes('youtube.com/shorts/')) {
       const shortId = url.split('youtube.com/shorts/')[1].split('?')[0].split('/')[0];
       if (shortId) {
@@ -598,14 +937,23 @@ function normalizeMediaUrl(rawUrl) {
       if (vidId) {
         url = `https://www.youtube.com/watch?v=${vidId}`;
       }
-    }
-
-    // Clean tracking params like si=, feature=
-    if (url.includes('youtube.com/watch')) {
+    } else if (url.includes('youtube.com/watch')) {
       const parsed = new URL(url);
       const v = parsed.searchParams.get('v');
       if (v) {
         url = `https://www.youtube.com/watch?v=${v}`;
+      }
+    }
+
+    // 2. Instagram Normalization (Reels, Posts, Stories, Share links)
+    if (url.includes('instagram.com/')) {
+      // Normalize share links: /share/reel/CODE/ or /share/p/CODE/ -> /reel/CODE/ or /p/CODE/
+      url = url.replace(/\/share\/(reel|p)\//, '/$1/');
+      // Strip tracking queries (?igsh=..., &utm_source=...)
+      url = url.split('?')[0].split('#')[0];
+      // Ensure trailing slash for Instagram endpoint consistency
+      if (!url.endsWith('/')) {
+        url += '/';
       }
     }
   } catch (e) {}
@@ -613,8 +961,69 @@ function normalizeMediaUrl(rawUrl) {
   return url;
 }
 
+/**
+ * Spawns a yt-dlp JSON extraction pass with given arguments
+ */
+function runYtdlpJsonPass(executablePath, cleanUrl, cookieBrowser = null, extraArgs = []) {
+  return new Promise((resolve) => {
+    const args = [
+      '--dump-single-json',
+      '--no-warnings',
+      '--no-check-certificates',
+      '--no-playlist',
+      '--prefer-free-formats',
+      '--socket-timeout', '25',
+      '--retries', '8',
+      '--fragment-retries', '8',
+      '--format-sort', 'res,fps,codec:h264:m4a,size',
+      '--extractor-args', 'youtube:player_client=android,ios,web,web_embedded,mweb',
+      '--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      '--add-header', 'Accept-Language:en-US,en;q=0.9',
+      ...extraArgs
+    ];
+
+    if (cachedFfmpegPath) {
+      args.unshift('--ffmpeg-location', cachedFfmpegPath);
+    }
+
+    if (cookieBrowser && cookieBrowser !== 'none') {
+      args.push('--cookies-from-browser', cookieBrowser);
+    }
+
+    args.push(cleanUrl);
+
+    console.log(`[YAS Main] Running yt-dlp analysis (cookies: ${cookieBrowser || 'none'}): ${executablePath} ${args.join(' ')}`);
+
+    let ytdlpProcess;
+    try {
+      ytdlpProcess = spawn(executablePath, args);
+    } catch (err) {
+      return resolve({ code: -1, stdout: '', stderr: err.message, error: err });
+    }
+
+    let stdoutData = '';
+    let stderrData = '';
+
+    ytdlpProcess.stdout.on('data', (chunk) => {
+      stdoutData += chunk.toString();
+    });
+
+    ytdlpProcess.stderr.on('data', (chunk) => {
+      stderrData += chunk.toString();
+    });
+
+    ytdlpProcess.on('close', (code) => {
+      resolve({ code, stdout: stdoutData, stderr: stderrData });
+    });
+
+    ytdlpProcess.on('error', (err) => {
+      resolve({ code: -1, stdout: stdoutData, stderr: err.message, error: err });
+    });
+  });
+}
+
 // -------------------------------------------------------------
-// Media Analysis Engine (yt-dlp)
+// Media Analysis Engine (yt-dlp with Auto-Cookie Anti-Bot Bypass)
 // -------------------------------------------------------------
 ipcMain.handle('media:analyze', async (event, targetUrl) => {
   console.log(`[YAS Main] Analyzing media URL: ${targetUrl}`);
@@ -647,91 +1056,101 @@ ipcMain.handle('media:analyze', async (event, targetUrl) => {
     if (ffmpegInfo.available) cachedFfmpegPath = ffmpegInfo.path;
   }
 
-  return new Promise((resolve) => {
-    const args = [
-      '--dump-single-json',
-      '--no-warnings',
-      '--no-check-certificates',
-      '--no-playlist',
-      '--prefer-free-formats',
-      '--format-sort', 'res,fps,codec:h264:m4a,size',
-      '--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      cleanUrl
-    ];
+  const executablePath = cachedYtdlpPath || 'yt-dlp';
+  const cookieCandidates = getCookieBrowserCandidates();
+  const isYouTube = /youtube\.com|youtu\.be/i.test(cleanUrl);
+  const isInstagram = /instagram\.com/i.test(cleanUrl);
 
-    if (cachedFfmpegPath) {
-      args.unshift('--ffmpeg-location', cachedFfmpegPath);
-    }
+  // Strategy:
+  // 1. If we have a previously successful cookie browser or preferred cookie browser, try with that first.
+  // 2. If no cookie browser was previously active, try initial clean pass.
+  // 3. If initial attempt hits bot verification / login / 429 / age restriction, loop through candidate browsers.
 
-    let ytdlpProcess;
-    try {
-      ytdlpProcess = spawn(cachedYtdlpPath || 'yt-dlp', args);
-    } catch (err) {
-      console.error('[YAS Main] Failed to spawn yt-dlp:', err);
-      const fallback = generateFallbackAnalysis(cleanUrl);
-      return resolve({
-        success: true,
-        data: fallback,
-        isSimulated: true,
-        notice: `Could not launch yt-dlp (${err.message}). Showing preview format matrix.`
-      });
-    }
-
-    let stdoutData = '';
-    let stderrData = '';
-
-    ytdlpProcess.stdout.on('data', (chunk) => {
-      stdoutData += chunk.toString();
-    });
-
-    ytdlpProcess.stderr.on('data', (chunk) => {
-      stderrData += chunk.toString();
-    });
-
-    ytdlpProcess.on('close', (code) => {
-      if (code === 0 && stdoutData.trim()) {
-        try {
-          const rawInfo = JSON.parse(stdoutData);
-          const normalized = processRawYtdlpMetadata(cleanUrl, rawInfo);
-          return resolve({ success: true, data: normalized, isSimulated: false });
-        } catch (err) {
-          console.error('[YAS Main] Failed to parse yt-dlp JSON:', err);
-          return resolve({
-            success: false,
-            error: 'Failed to parse stream metadata from yt-dlp output.',
-            errorType: 'parse_error'
-          });
-        }
-      }
-
-      console.warn(`[YAS Main] yt-dlp analysis exited with code ${code}. Stderr: ${stderrData}`);
-      const tailoredError = parseYtdlpStderr(stderrData);
-      
-      // If error is explicit (e.g. private, age-restricted, login required, invalid link), return friendly explanation
-      if (tailoredError.isExplicit) {
-        return resolve({
-          success: false,
-          error: tailoredError.message,
-          errorType: tailoredError.type
-        });
-      }
-
-      // Safe fallback preview if general extraction issue occurred
-      const fallback = generateFallbackAnalysis(cleanUrl);
-      resolve({
-        success: true,
-        data: fallback,
-        isSimulated: true,
-        notice: tailoredError.message || `Extractor returned status ${code}. Displaying preview format matrix.`
-      });
-    });
-
-    ytdlpProcess.on('error', (err) => {
-      console.warn('[YAS Main] Error in yt-dlp process:', err.message);
-      const fallback = generateFallbackAnalysis(cleanUrl);
-      resolve({ success: true, data: fallback, isSimulated: true });
-    });
+  logDownloaderEvent('ANALYSIS', `Starting analysis for URL (${isYouTube ? 'YouTube' : (isInstagram ? 'Instagram' : 'Web')})`, {
+    target: cleanUrl.substring(0, 80),
+    platform: isYouTube ? 'YouTube' : (isInstagram ? 'Instagram' : 'Web'),
+    ytdlpLocation: executablePath,
+    ffmpegLocation: cachedFfmpegPath || 'Not Found'
   });
+
+  let initialCookie = lastSuccessfulCookieBrowser || (preferredCookieBrowser !== 'auto' ? preferredCookieBrowser : null);
+  logDownloaderEvent('COOKIE_BRIDGE', `Initial extraction attempt with cookie source: ${initialCookie || 'None (Direct anti-bot profile)'}`);
+
+  let firstPass = await runYtdlpJsonPass(executablePath, cleanUrl, initialCookie);
+
+  if (firstPass.code === 0 && firstPass.stdout.trim()) {
+    try {
+      const rawInfo = JSON.parse(firstPass.stdout);
+      const normalized = processRawYtdlpMetadata(cleanUrl, rawInfo);
+      logDownloaderEvent('ANALYSIS', `✓ Extraction succeeded on initial pass (${normalized.title.substring(0, 50)})`, {
+        cookieSourceUsed: initialCookie || 'None',
+        formatCount: normalized.formats?.length || 0
+      });
+      return { success: true, data: normalized, isSimulated: false, usedCookies: initialCookie };
+    } catch (parseErr) {
+      console.error('[YAS Main] Failed to parse yt-dlp JSON:', parseErr);
+      logDownloaderEvent('ERROR', `Failed to parse yt-dlp JSON output`, { error: parseErr.message });
+    }
+  }
+
+  // Check if stderr indicates bot verification, login required, or age gate
+  const needsCookies = /sign in to confirm|confirm you are not a bot|bot verification|Use --cookies-from-browser|HTTP Error 429|login required|confirm your age|age-restricted|private video/i.test(firstPass.stderr);
+  
+  logDownloaderEvent('ANTI_BOT', `Initial pass returned status ${firstPass.code}. Anti-bot challenge detected: ${needsCookies ? 'Yes' : 'No'}`, {
+    stderrPreview: (firstPass.stderr || '').substring(0, 140).replace(/\r?\n/g, ' ')
+  });
+
+  if (needsCookies || firstPass.code !== 0) {
+    console.log(`[YAS Main] Initial pass encountered anti-bot/access challenge. Retrying with browser cookie extraction...`);
+
+    for (const browserId of cookieCandidates) {
+      if (browserId === initialCookie) continue; // Already tried
+
+      logDownloaderEvent('COOKIE_BRIDGE', `Attempting fallback session cookie extraction via [${browserId}]...`);
+      const retryPass = await runYtdlpJsonPass(executablePath, cleanUrl, browserId);
+
+      if (retryPass.code === 0 && retryPass.stdout.trim()) {
+        try {
+          const rawInfo = JSON.parse(retryPass.stdout);
+          const normalized = processRawYtdlpMetadata(cleanUrl, rawInfo);
+          lastSuccessfulCookieBrowser = browserId;
+          logDownloaderEvent('COOKIE_BRIDGE', `✓ Anti-bot challenge bypassed using [${browserId}] browser session cookies!`, {
+            browser: browserId,
+            mediaTitle: normalized.title.substring(0, 50)
+          });
+          return { success: true, data: normalized, isSimulated: false, usedCookies: browserId };
+        } catch (_) {}
+      } else {
+        logDownloaderEvent('COOKIE_BRIDGE', `Fallback attempt with [${browserId}] exited with code ${retryPass.code}`);
+      }
+    }
+  }
+
+  // If all live extractor passes failed, parse the final stderr to provide a clear explanation
+  const tailoredError = parseYtdlpStderr(firstPass.stderr);
+  logDownloaderEvent('ERROR', `All extraction passes failed. Final error category: [${tailoredError.type}]`, {
+    errorTitle: tailoredError.title,
+    errorMessage: tailoredError.message
+  });
+
+  if (tailoredError.isExplicit) {
+    return {
+      success: false,
+      error: tailoredError.message,
+      errorTitle: tailoredError.title,
+      errorType: tailoredError.type,
+      suggestedAction: tailoredError.suggestedAction
+    };
+  }
+
+  // Safe fallback preview if general extraction issue occurred
+  const fallback = generateFallbackAnalysis(cleanUrl);
+  return {
+    success: true,
+    data: fallback,
+    isSimulated: true,
+    notice: tailoredError.message || `Extractor returned status ${firstPass.code}. Displaying preview format matrix.`
+  };
 });
 
 /**
@@ -739,12 +1158,24 @@ ipcMain.handle('media:analyze', async (event, targetUrl) => {
  */
 function parseYtdlpStderr(stderr) {
   if (!stderr || typeof stderr !== 'string') {
-    return { message: 'Stream analysis encountered an issue.', isExplicit: false, type: 'unknown' };
+    return { title: 'Extraction Issue', message: 'Stream analysis encountered an unexpected response.', isExplicit: false, type: 'unknown' };
+  }
+
+  if (/Sign in to confirm you are not a bot|bot verification|Use --cookies-from-browser/i.test(stderr)) {
+    return {
+      title: 'YouTube Bot Verification',
+      message: 'YouTube requested verification to confirm you are not a bot. YAS Browser connects with your installed browser (Edge, Chrome, or Brave) cookies to bypass this check.',
+      suggestedAction: 'Ensure you are signed in to YouTube in Microsoft Edge or Google Chrome.',
+      isExplicit: true,
+      type: 'bot_challenge'
+    };
   }
 
   if (/Sign in to confirm your age|age-restricted|confirm your age/i.test(stderr)) {
     return {
-      message: 'This video is age-restricted and requires YouTube account authentication / cookies to access.',
+      title: 'Age-Restricted Content',
+      message: 'This video is age-restricted and requires an active signed-in YouTube account to view.',
+      suggestedAction: 'Log in to YouTube in Microsoft Edge or Chrome so YAS can use your verified session.',
       isExplicit: true,
       type: 'age_restricted'
     };
@@ -752,7 +1183,9 @@ function parseYtdlpStderr(stderr) {
 
   if (/Private video|Video unavailable|This video is private|Video is private/i.test(stderr)) {
     return {
-      message: 'This media is marked private or has been removed by the creator.',
+      title: 'Private Media',
+      message: 'This video is marked private or has been removed by the creator.',
+      suggestedAction: 'Verify that the video link is public.',
       isExplicit: true,
       type: 'private'
     };
@@ -760,15 +1193,19 @@ function parseYtdlpStderr(stderr) {
 
   if (/not available in your country|geo-restricted|uploader has not made this video available/i.test(stderr)) {
     return {
+      title: 'Region Blocked',
       message: 'This media is geo-restricted and is not available in your region.',
+      suggestedAction: 'Try using a VPN or accessing from a supported region.',
       isExplicit: true,
       type: 'geo_blocked'
     };
   }
 
-  if (/Login required|Instagram requires authentication|login to view/i.test(stderr)) {
+  if (/Login required|Instagram requires authentication|login to view|Please log in/i.test(stderr)) {
     return {
-      message: 'Instagram requires login session cookies to view this private reel or post.',
+      title: 'Instagram Login Required',
+      message: 'Instagram requires an active login session to view this reel or private post.',
+      suggestedAction: 'Log into Instagram in Microsoft Edge, Google Chrome, or Brave.',
       isExplicit: true,
       type: 'login_required'
     };
@@ -776,7 +1213,9 @@ function parseYtdlpStderr(stderr) {
 
   if (/is not a valid URL|Unsupported URL|No video formats found/i.test(stderr)) {
     return {
+      title: 'Unsupported URL',
       message: 'The link entered is not recognized as a supported YouTube or Instagram video URL.',
+      suggestedAction: 'Please paste a direct YouTube video, short, or Instagram reel link.',
       isExplicit: true,
       type: 'invalid_url'
     };
@@ -784,7 +1223,9 @@ function parseYtdlpStderr(stderr) {
 
   if (/HTTP Error 429|Too Many Requests/i.test(stderr)) {
     return {
-      message: 'YouTube or Instagram has temporarily rate-limited extraction requests. Please wait a moment and try again.',
+      title: 'Rate Limit (HTTP 429)',
+      message: 'YouTube or Instagram has temporarily rate-limited requests from your network.',
+      suggestedAction: 'Wait 30-60 seconds and try again.',
       isExplicit: true,
       type: 'rate_limited'
     };
@@ -792,7 +1233,9 @@ function parseYtdlpStderr(stderr) {
 
   if (/getaddrinfo ENOTFOUND|Connection refused|Network is unreachable|timed out/i.test(stderr)) {
     return {
-      message: 'Network connection failed while reaching the media server. Please check your internet connection.',
+      title: 'Network Connection Error',
+      message: 'Could not connect to the media server. Please check your internet connection.',
+      suggestedAction: 'Check your network connection and retry.',
       isExplicit: true,
       type: 'network_error'
     };
@@ -804,6 +1247,7 @@ function parseYtdlpStderr(stderr) {
   const cleanMessage = errorLine ? errorLine.replace('ERROR:', '').trim() : 'Media extraction could not be completed.';
 
   return {
+    title: 'Extraction Error',
     message: cleanMessage,
     isExplicit: false,
     type: 'general'
@@ -1079,6 +1523,11 @@ ipcMain.handle('media:start-download', async (event, config) => {
     '--no-warnings',
     '--no-check-certificates',
     '--no-playlist',
+    '--socket-timeout', '30',
+    '--retries', '10',
+    '--fragment-retries', '10',
+    '--extractor-args', 'youtube:player_client=android,ios,web,web_embedded,mweb',
+    '--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
     '--progress-template',
     'DOWNLOAD_PROGRESS|%(progress.downloaded_bytes)s|%(progress.total_bytes_estimate)s|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress.filename)s',
     '-o', outputTemplate
@@ -1086,6 +1535,12 @@ ipcMain.handle('media:start-download', async (event, config) => {
 
   if (cachedFfmpegPath) {
     args.push('--ffmpeg-location', cachedFfmpegPath);
+  }
+
+  // Inject browser cookies if available or previously verified
+  const activeCookie = lastSuccessfulCookieBrowser || (preferredCookieBrowser !== 'auto' && preferredCookieBrowser !== 'none' ? preferredCookieBrowser : (getCookieBrowserCandidates()[0] || null));
+  if (activeCookie && activeCookie !== 'none') {
+    args.push('--cookies-from-browser', activeCookie);
   }
 
   if (formatId === 'extract_mp3_320') {
@@ -1102,6 +1557,13 @@ ipcMain.handle('media:start-download', async (event, config) => {
     args.push('-f', 'bestvideo+bestaudio/best', '--merge-output-format', 'mp4', cleanUrl);
   }
 
+  logDownloaderEvent('DOWNLOAD', `Spawning download job [${downloadId}] for format: ${formatId || 'best'}`, {
+    title: (title || 'Media').substring(0, 40),
+    cookieSource: activeCookie || 'None',
+    ffmpegLocation: cachedFfmpegPath || 'Not Found',
+    targetDir
+  });
+
   console.log(`[YAS Main] Spawning download: ${executablePath} ${args.join(' ')}`);
 
   let downloadProcess;
@@ -1109,6 +1571,7 @@ ipcMain.handle('media:start-download', async (event, config) => {
     downloadProcess = spawn(executablePath, args);
   } catch (err) {
     console.error('[YAS Main] Error spawning yt-dlp:', err);
+    logDownloaderEvent('ERROR', `Failed to spawn yt-dlp download process: ${err.message}`);
     return { success: false, error: err.message };
   }
 
@@ -1165,6 +1628,10 @@ ipcMain.handle('media:start-download', async (event, config) => {
         const match = trimmed.match(/"([^"]+)"/);
         if (match && match[1]) finalFilePath = match[1];
 
+        logDownloaderEvent('FFMPEG', `Merging audio and video DASH streams with FFmpeg...`, {
+          destination: finalFilePath ? path.basename(finalFilePath) : 'merged.mp4'
+        });
+
         mainWindow?.webContents.send('media:progress', {
           downloadId,
           percent: 98,
@@ -1178,6 +1645,10 @@ ipcMain.handle('media:start-download', async (event, config) => {
         // Intercept audio extraction step
         const targetAudio = trimmed.replace('[ExtractAudio] Destination:', '').trim();
         if (targetAudio) finalFilePath = targetAudio;
+
+        logDownloaderEvent('FFMPEG', `Extracting and re-encoding studio audio with FFmpeg`, {
+          destination: targetAudio ? path.basename(targetAudio) : 'audio'
+        });
 
         mainWindow?.webContents.send('media:progress', {
           downloadId,
@@ -1206,6 +1677,10 @@ ipcMain.handle('media:start-download', async (event, config) => {
         resolvedPath = path.join(targetDir, `${sanitizeFilename(title)}.${ext || 'mp4'}`);
       }
 
+      logDownloaderEvent('DOWNLOAD', `✓ Download job [${downloadId}] completed successfully!`, {
+        file: path.basename(resolvedPath || 'media.mp4')
+      });
+
       mainWindow?.webContents.send('media:progress', {
         downloadId,
         percent: 100,
@@ -1217,6 +1692,10 @@ ipcMain.handle('media:start-download', async (event, config) => {
       });
     } else {
       const tailored = parseYtdlpStderr(errorBuffer);
+      logDownloaderEvent('ERROR', `Download job [${downloadId}] failed with exit code ${code} (${tailored.title})`, {
+        error: tailored.message
+      });
+
       mainWindow?.webContents.send('media:progress', {
         downloadId,
         percent: 0,

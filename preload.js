@@ -30,7 +30,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectDirectory: () => ipcRenderer.invoke('dialog:choose-directory'),
   checkDependencies: () => ipcRenderer.invoke('system:check-dependencies'),
   getDiagnostics: () => ipcRenderer.invoke('system:check-dependencies'),
+  runSelfTest: () => ipcRenderer.invoke('system:run-self-test'),
   downloadBinaries: () => ipcRenderer.invoke('system:install-binaries'),
+  getCookieBrowsers: () => ipcRenderer.invoke('system:get-cookie-browsers'),
+  setCookieBrowser: (browserId) => ipcRenderer.invoke('system:set-cookie-browser', browserId),
+  getDiagnosticsLogs: () => ipcRenderer.invoke('system:get-diagnostics-logs'),
+  clearDiagnosticsLogs: () => ipcRenderer.invoke('system:clear-diagnostics-logs'),
   copyToClipboard: (text) => ipcRenderer.invoke('system:copy-to-clipboard', text),
   
   // Context Menu & Tab IPC Bridge
