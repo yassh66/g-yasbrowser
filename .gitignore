@@ -12,4 +12,5 @@ coverage/
 resources/bin/*.exe
 resources/bin/*.zip
 resources/bin/*.tar.gz
+resources/bin/yt-dlp
 !resources/bin/.gitkeep

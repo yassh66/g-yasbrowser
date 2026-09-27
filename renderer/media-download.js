@@ -744,7 +744,9 @@ class MediaDownloader {
         downloadId: downloadId,
         url: downloadJob.url,
         formatId: downloadJob.formatId,
-        destinationFolder: this.destinationFolder
+        destinationFolder: this.destinationFolder,
+        title: downloadJob.title,
+        ext: fmt ? fmt.ext : 'mp4'
       });
     } else {
       // Simulate real-time progress for preview environment

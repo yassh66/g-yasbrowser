@@ -869,19 +869,35 @@ export class ExtractionManager {
   // Download Execution Pipeline
   // -------------------------------------------------------------
   async startDownload(config, callbacks = {}) {
-    const { downloadId, url, formatId, destinationFolder, outputFolder, title, ext } = config;
+    const {
+      downloadId = `dl_${Date.now()}`,
+      url,
+      formatId,
+      destinationFolder,
+      outputFolder,
+      title = 'Media_Download',
+      ext = 'mp4'
+    } = config;
     const { onProgress, onComplete, onError } = callbacks;
-    const targetDir = destinationFolder || outputFolder || path.join(os.homedir(), 'Downloads');
+    const targetDir = path.resolve(destinationFolder || outputFolder || path.join(os.homedir(), 'Downloads'));
 
     if (!fs.existsSync(targetDir)) {
-      try { fs.mkdirSync(targetDir, { recursive: true }); } catch (_) {}
+      try {
+        fs.mkdirSync(targetDir, { recursive: true });
+      } catch (err) {
+        this.log('ERROR', `Failed to create destination folder: ${targetDir} (${err.message})`);
+        if (onError) onError({ downloadId, error: `Could not access destination folder: ${targetDir}` });
+        return { success: false, error: err.message };
+      }
     }
 
     await this.ensureBinaries();
 
-    if (!this.cachedYtdlpPath) {
-      this.runSimulatedDownload(downloadId, title, ext, targetDir, onProgress, onComplete);
-      return { success: true, downloadId, isSimulated: true };
+    if (!this.cachedYtdlpPath || !fs.existsSync(this.cachedYtdlpPath)) {
+      const errMessage = 'yt-dlp executable not found. Please verify dependencies in Diagnostics.';
+      this.log('ERROR', `[${downloadId}] ${errMessage}`);
+      if (onError) onError({ downloadId, error: errMessage });
+      return { success: false, error: errMessage };
     }
 
     const executablePath = this.cachedYtdlpPath;
@@ -899,11 +915,12 @@ export class ExtractionManager {
       '--extractor-args', 'youtube:player_client=android,ios',
       '--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
       '--progress-template',
-      'DOWNLOAD_PROGRESS|%(progress.downloaded_bytes)s|%(progress.total_bytes_estimate)s|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress.filename)s',
+      'DOWNLOAD_PROGRESS|%(progress.downloaded_bytes)s|%(progress.total_bytes_estimate)s|%(progress.total_bytes)s|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress.filename)s',
+      '--print', 'after_move:FINAL_OUTPUT_FILE|%(filepath)s',
       '-o', outputTemplate
     ];
 
-    if (this.cachedFfmpegPath) {
+    if (this.cachedFfmpegPath && fs.existsSync(this.cachedFfmpegPath)) {
       args.push('--ffmpeg-location', this.cachedFfmpegPath);
     }
 
@@ -913,39 +930,59 @@ export class ExtractionManager {
       args.push('--cookies-from-browser', this.lastSuccessfulCookieBrowser);
     }
 
+    // Map format selection accurately to yt-dlp format expressions
     if (formatId === 'extract_mp3_320') {
       args.push('-x', '--audio-format', 'mp3', '--audio-quality', '0', cleanUrl);
     } else if (formatId === 'extract_m4a_best') {
       args.push('-x', '--audio-format', 'm4a', cleanUrl);
     } else if (formatId === 'extract_flac_lossless') {
       args.push('-x', '--audio-format', 'flac', cleanUrl);
+    } else if (typeof formatId === 'string' && formatId.startsWith('extract_')) {
+      const audioFmt = formatId.replace('extract_', '').split('_')[0] || ext || 'mp3';
+      args.push('-x', '--audio-format', audioFmt, cleanUrl);
+    } else if (formatId === 'yt_raw_1080') {
+      args.push('-f', 'bestvideo[height<=1080]/bestvideo', cleanUrl);
+    } else if (formatId === 'yt_combined_1080') {
+      args.push('-f', 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best', '--merge-output-format', 'mp4', cleanUrl);
     } else if (formatId && formatId.includes('+')) {
       args.push('-f', formatId, '--merge-output-format', 'mp4', cleanUrl);
-    } else if (formatId) {
+    } else if (formatId && formatId !== 'best' && formatId !== 'auto') {
       args.push('-f', formatId, cleanUrl);
     } else {
       args.push('-f', 'bestvideo+bestaudio/best', '--merge-output-format', 'mp4', cleanUrl);
     }
 
-    this.log('DOWNLOAD', `Spawning download job [${downloadId}] for format: ${formatId || 'best'}`);
+    // Developer internal logging: sanitize cookies
+    const sanitizedArgs = args.map((arg, i) => {
+      if (args[i - 1] === '--cookies') return '<custom_cookies.txt>';
+      return arg;
+    });
+    const fullCmd = `"${executablePath}" ${sanitizedArgs.join(' ')}`;
+    this.log('DOWNLOAD', `[${downloadId}] Executing: ${fullCmd}`);
 
     let downloadProcess;
     try {
-      downloadProcess = spawn(executablePath, args);
+      downloadProcess = spawn(executablePath, args, { windowsHide: true });
     } catch (err) {
-      this.log('ERROR', `Failed to spawn yt-dlp download: ${err.message}`);
-      if (onError) onError({ downloadId, error: 'Could not initialize download stream.' });
+      this.log('ERROR', `[${downloadId}] Failed to spawn yt-dlp process: ${err.message}`);
+      if (onError) onError({ downloadId, error: 'Could not initialize download process.' });
       return { success: false, error: err.message };
     }
 
+    this.log('DOWNLOAD', `[${downloadId}] Process spawned successfully (PID: ${downloadProcess.pid})`);
+
     let finalFilePath = null;
     let lastPercent = 0;
+    let stderrOutput = '';
+    let isMerging = false;
 
     this.activeDownloads.set(downloadId, {
       process: downloadProcess,
       downloadId,
       url: cleanUrl,
-      outputFolder: targetDir
+      outputFolder: targetDir,
+      title,
+      ext
     });
 
     downloadProcess.stdout.on('data', (data) => {
@@ -954,62 +991,114 @@ export class ExtractionManager {
 
       for (const line of lines) {
         const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        // Capture authoritative output file print
+        if (trimmed.startsWith('FINAL_OUTPUT_FILE|')) {
+          const recorded = trimmed.replace('FINAL_OUTPUT_FILE|', '').trim();
+          if (recorded && recorded !== 'NA') {
+            finalFilePath = recorded;
+          }
+          continue;
+        }
+
+        // Custom template progress parser
         if (trimmed.startsWith('DOWNLOAD_PROGRESS|')) {
           const parts = trimmed.split('|');
-          if (parts.length >= 7) {
+          if (parts.length >= 8) {
             const downloadedBytes = parseInt(parts[1], 10) || 0;
-            const totalBytes = parseInt(parts[2], 10) || 0;
-            const percentStr = parts[3].replace('%', '').trim();
-            const speedStr = parts[4].trim();
-            const etaStr = parts[5].trim();
-            const filename = parts[6].trim();
+            const totalBytes = parseInt(parts[3], 10) || parseInt(parts[2], 10) || 0;
+            const percentStr = parts[4].replace('%', '').trim();
+            const speedStr = parts[5].trim();
+            const etaStr = parts[6].trim();
+            const filename = parts[7].trim();
 
             if (filename && filename !== 'NA') finalFilePath = filename;
-            const percent = parseFloat(percentStr) || 0;
-            lastPercent = Math.max(lastPercent, percent);
+            const parsedPercent = parseFloat(percentStr);
+            if (!isNaN(parsedPercent) && parsedPercent >= 0) {
+              lastPercent = Math.min(99, Math.max(lastPercent, parsedPercent));
+            }
 
             if (onProgress) {
               onProgress({
                 downloadId,
-                percent: Math.min(100, Math.max(0, lastPercent)),
-                speed: speedStr && speedStr !== 'NA' ? speedStr : '14.8 MB/s',
-                eta: etaStr && etaStr !== 'NA' ? etaStr : '00:08s',
+                percent: Math.min(99, Math.max(0, lastPercent)),
+                speed: speedStr && speedStr !== 'NA' ? speedStr : 'Calculating...',
+                eta: etaStr && etaStr !== 'NA' ? etaStr : '--',
                 downloadedBytes,
                 totalBytes,
-                downloadedStr: this.formatBytes(downloadedBytes) + (totalBytes ? ` / ${this.formatBytes(totalBytes)}` : ''),
-                status: 'downloading',
-                phase: 'downloading',
+                downloaded: this.formatBytes(downloadedBytes),
+                totalSize: totalBytes ? this.formatBytes(totalBytes) : '...',
+                status: isMerging ? 'merging' : 'downloading',
+                phase: isMerging ? 'Merging audio and video tracks...' : 'downloading',
                 filePath: finalFilePath
               });
             }
           }
-        } else if (trimmed.includes('[Merger] Merging formats into')) {
+        } 
+        // Standard yt-dlp [download] progress regex fallback
+        else if (trimmed.startsWith('[download]')) {
+          const matchPercent = trimmed.match(/([0-9.]+)%/);
+          const matchSpeed = trimmed.match(/at\s+([0-9.]+[a-zA-Z/]+)/i);
+          const matchEta = trimmed.match(/ETA\s+([0-9:]+)/i);
+          const matchDest = trimmed.match(/Destination:\s*(.+)$/i);
+
+          if (matchDest && matchDest[1]) {
+            finalFilePath = matchDest[1].trim();
+          }
+
+          if (matchPercent) {
+            const p = parseFloat(matchPercent[1]);
+            if (!isNaN(p)) {
+              lastPercent = Math.min(99, Math.max(lastPercent, p));
+            }
+          }
+
+          if (onProgress) {
+            onProgress({
+              downloadId,
+              percent: Math.min(99, Math.max(0, lastPercent)),
+              speed: matchSpeed ? matchSpeed[1] : 'Downloading...',
+              eta: matchEta ? matchEta[1] : '--',
+              status: isMerging ? 'merging' : 'downloading',
+              phase: isMerging ? 'Merging streams via FFmpeg...' : 'downloading',
+              filePath: finalFilePath
+            });
+          }
+        } 
+        // FFmpeg Merger detection
+        else if (trimmed.includes('[Merger] Merging formats into')) {
+          isMerging = true;
           const match = trimmed.match(/"([^"]+)"/);
           if (match && match[1]) finalFilePath = match[1];
 
+          this.log('DOWNLOAD', `[${downloadId}] FFmpeg muxer started: merging video and audio streams into "${finalFilePath || 'mp4'}"`);
           if (onProgress) {
             onProgress({
               downloadId,
               percent: 98,
               speed: 'FFmpeg Muxer',
-              eta: '00:02s',
+              eta: 'Finishing...',
               status: 'merging',
-              phase: 'Merging audio & video tracks via FFmpeg...',
+              phase: 'Merging audio and video tracks via FFmpeg...',
               filePath: finalFilePath
             });
           }
-        } else if (trimmed.includes('[ExtractAudio] Destination:')) {
+        } 
+        // Audio extraction detection
+        else if (trimmed.includes('[ExtractAudio] Destination:')) {
           const targetAudio = trimmed.replace('[ExtractAudio] Destination:', '').trim();
           if (targetAudio) finalFilePath = targetAudio;
 
+          this.log('DOWNLOAD', `[${downloadId}] Audio encoder started: converting audio to "${finalFilePath}"`);
           if (onProgress) {
             onProgress({
               downloadId,
-              percent: 99,
+              percent: 98,
               speed: 'Audio Encoder',
-              eta: '00:01s',
+              eta: 'Finishing...',
               status: 'converting',
-              phase: 'Encoding studio soundtrack...',
+              phase: 'Encoding soundtrack...',
               filePath: finalFilePath
             });
           }
@@ -1017,39 +1106,84 @@ export class ExtractionManager {
       }
     });
 
+    downloadProcess.stderr.on('data', (data) => {
+      const errText = data.toString();
+      stderrOutput += errText;
+    });
+
     downloadProcess.on('close', (code) => {
       this.activeDownloads.delete(downloadId);
 
+      this.log('DOWNLOAD', `[${downloadId}] Process exited with code: ${code}`);
+
       if (code === 0) {
+        // Step 1: Resolve output file
         let resolvedPath = finalFilePath;
         if (!resolvedPath || !fs.existsSync(resolvedPath)) {
-          resolvedPath = path.join(targetDir, `${this.sanitizeFilename(title)}.${ext || 'mp4'}`);
+          try {
+            const files = fs.readdirSync(targetDir);
+            const candidates = files
+              .map(f => path.join(targetDir, f))
+              .filter(p => fs.existsSync(p) && !p.endsWith('.part') && !p.endsWith('.ytdl') && !p.endsWith('.temp'))
+              .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+
+            if (candidates.length > 0) {
+              resolvedPath = candidates[0];
+            }
+          } catch (_) {}
         }
 
-        this.log('DOWNLOAD', `✓ Download job [${downloadId}] completed successfully!`);
-        if (onComplete) {
-          onComplete({
+        // Step 2: Strict verification - file must exist and size > 0
+        if (resolvedPath && fs.existsSync(resolvedPath)) {
+          try {
+            const stat = fs.statSync(resolvedPath);
+            if (stat.size > 0) {
+              const sizeFormatted = this.formatBytes(stat.size);
+              this.log('DOWNLOAD', `✓ [${downloadId}] VERIFIED SUCCESS: "${resolvedPath}" (${sizeFormatted}, ${stat.size} bytes)`);
+
+              if (onComplete) {
+                onComplete({
+                  downloadId,
+                  percent: 100,
+                  speed: 'Finished',
+                  eta: '00:00',
+                  status: 'completed',
+                  phase: 'Complete',
+                  filePath: resolvedPath,
+                  fileSize: stat.size,
+                  fileSizeFormatted: sizeFormatted
+                });
+              }
+              return;
+            }
+          } catch (e) {
+            this.log('ERROR', `[${downloadId}] Error verifying file stat: ${e.message}`);
+          }
+        }
+
+        // Exit code was 0 but no valid non-zero file was found on disk
+        this.log('ERROR', `[${downloadId}] Download process reported 0 exit code but output file is missing or 0 bytes.`);
+        if (onError) {
+          onError({
             downloadId,
-            percent: 100,
-            speed: 'Finished',
-            eta: '00:00s',
-            status: 'completed',
-            phase: 'Complete',
-            filePath: resolvedPath
+            error: 'Download finished but the media file could not be verified on disk.',
+            code
           });
         }
       } else {
-        this.log('DOWNLOAD', `Download process closed with code ${code}. Activating graceful self-healing completion.`);
-        const resolvedPath = path.join(targetDir, `${this.sanitizeFilename(title)}.${ext || 'mp4'}`);
-        if (onComplete) {
-          onComplete({
+        // Non-zero exit code: report real error
+        const cleanError = stderrOutput.split('\n')
+          .filter(l => l.includes('ERROR:') || l.includes('HTTP Error') || l.includes('Sign in'))
+          .map(l => l.replace('ERROR:', '').trim())
+          .join(' ') || 'The media source could not be downloaded with the selected stream.';
+
+        this.log('ERROR', `[${downloadId}] Download failed (exit code ${code}): ${cleanError}`);
+        if (onError) {
+          onError({
             downloadId,
-            percent: 100,
-            speed: 'Finished',
-            eta: '00:00s',
-            status: 'completed',
-            phase: 'Complete',
-            filePath: resolvedPath
+            error: 'Download could not be completed. Please try another format or check connection.',
+            code,
+            rawError: cleanError
           });
         }
       }
@@ -1057,7 +1191,13 @@ export class ExtractionManager {
 
     downloadProcess.on('error', (err) => {
       this.activeDownloads.delete(downloadId);
-      if (onError) onError({ downloadId, error: err.message });
+      this.log('ERROR', `[${downloadId}] Process error event: ${err.message}`);
+      if (onError) {
+        onError({
+          downloadId,
+          error: 'Process execution error: ' + err.message
+        });
+      }
     });
 
     return { success: true, downloadId };
@@ -1077,56 +1217,6 @@ export class ExtractionManager {
       return true;
     }
     return false;
-  }
-
-  runSimulatedDownload(downloadId, title, ext, targetDir, onProgress, onComplete) {
-    let progress = 0;
-    const totalMB = 85;
-    const expectedPath = path.join(targetDir, `${this.sanitizeFilename(title)}.${ext || 'mp4'}`);
-
-    const timer = setInterval(() => {
-      if (!this.activeDownloads.has(downloadId)) {
-        clearInterval(timer);
-        return;
-      }
-
-      progress = Math.min(100, progress + Math.random() * 8.0 + 5.0);
-      const downloadedMB = ((progress / 100) * totalMB).toFixed(1);
-
-      if (onProgress) {
-        onProgress({
-          downloadId,
-          percent: Math.round(progress),
-          speed: progress >= 100 ? 'Finished' : (progress >= 95 ? 'FFmpeg Muxer' : '18.4 MB/s'),
-          eta: progress >= 100 ? '00:00s' : '00:03s',
-          downloadedBytes: Math.round(downloadedMB * 1024 * 1024),
-          totalBytes: Math.round(totalMB * 1024 * 1024),
-          downloadedStr: `${downloadedMB} MB / ${totalMB} MB`,
-          status: progress >= 100 ? 'completed' : (progress >= 95 ? 'merging' : 'downloading'),
-          phase: progress >= 100 ? 'Complete' : (progress >= 95 ? 'Merging audio & video tracks...' : 'Downloading stream...'),
-          filePath: expectedPath
-        });
-      }
-
-      if (progress >= 100) {
-        clearInterval(timer);
-        this.activeDownloads.delete(downloadId);
-        if (onComplete) {
-          onComplete({
-            downloadId,
-            percent: 100,
-            status: 'completed',
-            phase: 'Complete',
-            filePath: expectedPath
-          });
-        }
-      }
-    }, 280);
-
-    this.activeDownloads.set(downloadId, {
-      process: { kill: () => clearInterval(timer) },
-      downloadId
-    });
   }
 
   // -------------------------------------------------------------

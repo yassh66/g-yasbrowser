@@ -1686,65 +1686,6 @@ ipcMain.handle('dialog:choose-directory', async () => {
 });
 
 // -------------------------------------------------------------
-// Simulation Pipeline Engine (High-Fidelity Offline Fallback)
-// -------------------------------------------------------------
-function runSimulatedDownload(downloadId, url, title, formatId, ext, targetDir) {
-  let progress = 0;
-  const totalMB = formatId && formatId.includes('2160') ? 480 : (formatId && formatId.includes('1080') ? 120 : (formatId && formatId.includes('mp3') ? 28 : 55));
-  const expectedPath = path.join(targetDir, `${sanitizeFilename(title)}.${ext || 'mp4'}`);
-
-  const timer = setInterval(() => {
-    const isCancelled = !activeDownloads.has(downloadId);
-    if (isCancelled) {
-      clearInterval(timer);
-      return;
-    }
-
-    const step = Math.random() * 6.0 + 4.0;
-    progress = Math.min(100, progress + step);
-    const speed = (15.2 + Math.random() * 5.4).toFixed(1);
-    const downloadedMB = ((progress / 100) * totalMB).toFixed(1);
-    const remainingSecs = Math.max(0, Math.round((totalMB - downloadedMB) / parseFloat(speed)));
-
-    let status = 'downloading';
-    let phase = 'downloading';
-    if (progress >= 95 && progress < 99) {
-      status = 'merging';
-      phase = 'Merging video & audio streams with FFmpeg...';
-    } else if (progress >= 100) {
-      status = 'completed';
-      phase = 'Complete';
-    }
-
-    mainWindow?.webContents.send('media:progress', {
-      downloadId,
-      percent: Math.round(progress),
-      speed: status === 'completed' ? 'Finished' : (status === 'merging' ? 'FFmpeg Muxer' : `${speed} MB/s`),
-      eta: status === 'completed' ? '00:00s' : `00:${remainingSecs.toString().padStart(2, '0')}s`,
-      downloadedBytes: Math.round(downloadedMB * 1024 * 1024),
-      totalBytes: Math.round(totalMB * 1024 * 1024),
-      downloadedStr: `${downloadedMB} MB / ${totalMB} MB`,
-      status,
-      phase,
-      filePath: expectedPath
-    });
-
-    if (progress >= 100) {
-      clearInterval(timer);
-      activeDownloads.delete(downloadId);
-    }
-  }, 320);
-
-  activeDownloads.set(downloadId, {
-    process: { kill: () => clearInterval(timer) },
-    downloadId,
-    url,
-    status: 'downloading',
-    outputFolder: targetDir
-  });
-}
-
-// -------------------------------------------------------------
 // Helper Utilities
 // -------------------------------------------------------------
 function detectPlatform(url, extractor) {
