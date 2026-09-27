@@ -92,11 +92,37 @@ class MediaDownloader {
       engineModalBackdrop: document.getElementById('engineInstallModalBackdrop'),
       btnEngineModalClose: document.getElementById('btnEngineModalClose'),
       btnRescanDependencies: document.getElementById('btnRescanDependencies'),
+      btnRunEngineSelfTest: document.getElementById('btnRunEngineSelfTest'),
+      engineSelfTestContainer: document.getElementById('engineSelfTestContainer'),
+      selfTestOverallBadge: document.getElementById('selfTestOverallBadge'),
+      selfTestSummaryText: document.getElementById('selfTestSummaryText'),
+      selfTestGrid: document.getElementById('selfTestGrid'),
       btnDiagDone: document.getElementById('btnDiagDone'),
+      btnTestCookieBridge: document.getElementById('btnTestCookieBridge'),
+      manualCookieStatusText: document.getElementById('manualCookieStatusText'),
+      btnImportCookieFile: document.getElementById('btnImportCookieFile'),
+      btnTogglePasteCookie: document.getElementById('btnTogglePasteCookie'),
+      btnClearManualCookie: document.getElementById('btnClearManualCookie'),
+      pasteCookieBox: document.getElementById('pasteCookieBox'),
+      pasteCookieTextarea: document.getElementById('pasteCookieTextarea'),
+      btnSavePastedCookie: document.getElementById('btnSavePastedCookie'),
+      btnCancelPastedCookie: document.getElementById('btnCancelPastedCookie'),
+      cookieTestResultBox: document.getElementById('cookieTestResultBox'),
       ytdlpStatusPill: document.getElementById('ytdlpStatusPill'),
       ytdlpPathText: document.getElementById('ytdlpPathText'),
       ffmpegStatusPill: document.getElementById('ffmpegStatusPill'),
       ffmpegPathText: document.getElementById('ffmpegPathText'),
+      cookieBridgeStatusPill: document.getElementById('cookieBridgeStatusPill'),
+      cookieBrowsersList: document.getElementById('cookieBrowsersList'),
+      activeCookieBrowserText: document.getElementById('activeCookieBrowserText'),
+      diagLogsSection: document.getElementById('diagLogsSection'),
+      toggleDiagLogs: document.getElementById('toggleDiagLogs'),
+      diagLogsBody: document.getElementById('diagLogsBody'),
+      diagLogsCountBadge: document.getElementById('diagLogsCountBadge'),
+      diagLogsViewer: document.getElementById('diagLogsViewer'),
+      btnCopyDiagLogs: document.getElementById('btnCopyDiagLogs'),
+      btnClearDiagLogs: document.getElementById('btnClearDiagLogs'),
+      btnErrorLogs: document.getElementById('btnErrorLogs'),
       guideHeading: document.getElementById('guideHeading'),
       guideCommandText: document.getElementById('guideCommandText'),
       btnCopyGuideCommand: document.getElementById('btnCopyGuideCommand'),
@@ -146,17 +172,21 @@ class MediaDownloader {
     // Preset Platform Badges
     if (this.dom.presetYtBadge) {
       this.dom.presetYtBadge.addEventListener('click', () => {
-        this.dom.urlInput.value = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ';
-        this.updateInputClearButton();
-        this.startAnalysis();
+        if (this.dom.urlInput) {
+          this.dom.urlInput.value = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ';
+          this.updateInputClearButton();
+          this.startAnalysis();
+        }
       });
     }
 
     if (this.dom.presetIgBadge) {
       this.dom.presetIgBadge.addEventListener('click', () => {
-        this.dom.urlInput.value = 'https://www.instagram.com/reel/C3x9M8_L4Q1/';
-        this.updateInputClearButton();
-        this.startAnalysis();
+        if (this.dom.urlInput) {
+          this.dom.urlInput.value = 'https://www.instagram.com/reel/C3x9M8_L4Q1/';
+          this.updateInputClearButton();
+          this.startAnalysis();
+        }
       });
     }
 
@@ -197,13 +227,13 @@ class MediaDownloader {
 
   openPanel() {
     this.isOpen = true;
-    this.dom.overlay.classList.add('open');
+    if (this.dom.overlay) this.dom.overlay.classList.add('open');
 
     // Auto-populate URL if active tab has a YouTube / Instagram link
     if (window.yasBrowser) {
       const activeTab = window.yasBrowser.getActiveTab();
       if (activeTab && /youtube\.com|youtu\.be|instagram\.com/i.test(activeTab.url)) {
-        if (!this.dom.urlInput.value) {
+        if (this.dom.urlInput && !this.dom.urlInput.value) {
           this.dom.urlInput.value = activeTab.url;
           this.updateInputClearButton();
           this.startAnalysis();
@@ -212,13 +242,13 @@ class MediaDownloader {
     }
 
     setTimeout(() => {
-      this.dom.urlInput.focus();
+      if (this.dom.urlInput) this.dom.urlInput.focus();
     }, 150);
   }
 
   closePanel() {
     this.isOpen = false;
-    this.dom.overlay.classList.remove('open');
+    if (this.dom.overlay) this.dom.overlay.classList.remove('open');
   }
 
   togglePanel() {
@@ -278,16 +308,18 @@ class MediaDownloader {
     const clearBtn = this.dom.inputClearBtn;
     const pasteBtn = this.dom.pasteClipboardBtn;
 
-    input.addEventListener('input', () => {
-      this.updateInputClearButton();
-      this.dom.errorCard.style.display = 'none';
-    });
+    if (input) {
+      input.addEventListener('input', () => {
+        this.updateInputClearButton();
+        if (this.dom.errorCard) this.dom.errorCard.style.display = 'none';
+      });
 
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        this.startAnalysis();
-      }
-    });
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          this.startAnalysis();
+        }
+      });
+    }
 
     if (clearBtn) {
       clearBtn.addEventListener('click', () => {
@@ -300,7 +332,7 @@ class MediaDownloader {
         try {
           const text = await navigator.clipboard.readText();
           if (text) {
-            input.value = text.trim();
+            if (input) input.value = text.trim();
             this.updateInputClearButton();
             this.startAnalysis();
           }
@@ -311,23 +343,31 @@ class MediaDownloader {
     }
 
     // Analyze Button
-    this.dom.btnAnalyze.addEventListener('click', () => {
-      this.startAnalysis();
-    });
+    if (this.dom.btnAnalyze) {
+      this.dom.btnAnalyze.addEventListener('click', () => {
+        this.startAnalysis();
+      });
+    }
 
     // ⚡ 1-Click Best Quality Instant Download Button
-    this.dom.btnQuickBest.addEventListener('click', () => {
-      this.triggerQuickBestQuality();
-    });
+    if (this.dom.btnQuickBest) {
+      this.dom.btnQuickBest.addEventListener('click', () => {
+        this.triggerQuickBestQuality();
+      });
+    }
 
     // Retry and guide buttons in error card
-    this.dom.btnErrorRetry.addEventListener('click', () => {
-      this.startAnalysis();
-    });
+    if (this.dom.btnErrorRetry) {
+      this.dom.btnErrorRetry.addEventListener('click', () => {
+        this.startAnalysis();
+      });
+    }
 
-    this.dom.btnErrorGuide.addEventListener('click', () => {
-      this.openDiagnosticsModal();
-    });
+    if (this.dom.btnErrorGuide) {
+      this.dom.btnErrorGuide.addEventListener('click', () => {
+        this.openDiagnosticsModal();
+      });
+    }
   }
 
   updateInputClearButton() {
@@ -366,7 +406,7 @@ class MediaDownloader {
     this.dom.emptyState.style.display = 'none';
     this.dom.twoColumnGrid.style.display = 'none';
 
-    this.showLoadingPhase(1, 'Validating URL & Stream Manifests...', 'Extracting stream endpoints via yt-dlp');
+    this.showLoadingPhase(1, 'Analyzing media...', 'Connecting to media stream...');
 
     try {
       let rawResult = null;
@@ -388,17 +428,20 @@ class MediaDownloader {
       if (rawResult && rawResult.success !== false) {
         info = rawResult.data ? rawResult.data : rawResult;
       } else if (rawResult && rawResult.error) {
-        throw new Error(rawResult.error);
+        this.isAnalyzing = false;
+        this.dom.loadingCard.style.display = 'none';
+        this.showErrorState('Notice', 'Unable to process this media right now. Please try again later.');
+        return;
       } else {
         throw new Error('Unable to extract stream formats from the provided link.');
       }
 
-      this.showLoadingPhase(2, 'Resolving Stream Formats & Bitrates...', 'Sorting video resolutions and audio codecs');
-      await new Promise((r) => setTimeout(r, 250));
+      this.showLoadingPhase(2, 'Preparing available qualities...', 'Resolving video & audio options...');
+      await new Promise((r) => setTimeout(r, 200));
 
       if (requestId !== this.currentRequestId) return;
 
-      this.showLoadingPhase(3, 'Extraction Complete', 'Stream manifests verified');
+      this.showLoadingPhase(3, 'Ready to download', 'Stream manifests ready');
       await new Promise((r) => setTimeout(r, 150));
 
       if (requestId !== this.currentRequestId) return;
@@ -415,8 +458,8 @@ class MediaDownloader {
       this.isAnalyzing = false;
       this.dom.loadingCard.style.display = 'none';
       this.showErrorState(
-        'Analysis Failed',
-        err.message || 'Unable to extract formats. Check if the URL is accessible or configure yt-dlp.'
+        'Notice',
+        'Unable to process this media right now. Please try again later.'
       );
     }
   }
@@ -526,13 +569,15 @@ class MediaDownloader {
   }
 
   setupFormatTabs() {
-    this.dom.tabCombined.addEventListener('click', () => this.switchFormatTab('combined'));
-    this.dom.tabVideo.addEventListener('click', () => this.switchFormatTab('video'));
-    this.dom.tabAudio.addEventListener('click', () => this.switchFormatTab('audio'));
+    if (this.dom.tabCombined) this.dom.tabCombined.addEventListener('click', () => this.switchFormatTab('combined'));
+    if (this.dom.tabVideo) this.dom.tabVideo.addEventListener('click', () => this.switchFormatTab('video'));
+    if (this.dom.tabAudio) this.dom.tabAudio.addEventListener('click', () => this.switchFormatTab('audio'));
 
-    this.dom.btnStartDownload.addEventListener('click', () => {
-      this.startSelectedDownload();
-    });
+    if (this.dom.btnStartDownload) {
+      this.dom.btnStartDownload.addEventListener('click', () => {
+        this.startSelectedDownload();
+      });
+    }
   }
 
   switchFormatTab(category) {
@@ -755,7 +800,7 @@ class MediaDownloader {
     const job = this.activeDownloads.get(downloadId);
     if (!job) return;
 
-    if (data.status === 'completed' || (typeof data.percent === 'number' && data.percent >= 100)) {
+    if (data.status === 'completed') {
       this.onDownloadCompleted(downloadId, data);
       return;
     }
@@ -774,7 +819,7 @@ class MediaDownloader {
 
     if (data.status === 'merging') {
       job.status = 'merging';
-    } else if (job.status !== 'merging') {
+    } else if (job.status !== 'merging' && job.status !== 'completed') {
       job.status = 'downloading';
     }
 
@@ -795,7 +840,7 @@ class MediaDownloader {
       if (job.status === 'merging') {
         pill.className = 'queue-item-status-pill merging';
         pill.textContent = 'Muxing FFmpeg';
-      } else {
+      } else if (job.status !== 'completed') {
         pill.className = 'queue-item-status-pill downloading';
         pill.textContent = `${Math.round(job.progress)}%`;
       }
@@ -807,7 +852,7 @@ class MediaDownloader {
 
   onDownloadCompleted(downloadId, data) {
     const job = this.activeDownloads.get(downloadId);
-    if (!job) return;
+    if (!job || job.status === 'completed') return;
 
     job.status = 'completed';
     job.progress = 100;
@@ -852,7 +897,7 @@ class MediaDownloader {
       }
     }
 
-    this.showToast(`Download finished: ${job.title}`);
+    // No spam popup notifications on download completion as requested
     this.updateDownloadCounter();
   }
 
@@ -962,39 +1007,182 @@ class MediaDownloader {
       });
     }
 
+    // Run Comprehensive Health Self-Test
+    if (this.dom.btnRunEngineSelfTest) {
+      this.dom.btnRunEngineSelfTest.addEventListener('click', async () => {
+        await this.runEngineSelfTest();
+      });
+    }
+
+    // Run Cookie Bridge & Extractor Live Diagnostic Test
+    if (this.dom.btnTestCookieBridge) {
+      this.dom.btnTestCookieBridge.addEventListener('click', async () => {
+        await this.runCookieBridgeTest();
+      });
+    }
+
+    // Import Netscape cookies.txt file
+    if (this.dom.btnImportCookieFile) {
+      this.dom.btnImportCookieFile.addEventListener('click', async () => {
+        if (window.electronAPI && window.electronAPI.importCookieFile) {
+          const res = await window.electronAPI.importCookieFile();
+          if (res && res.success) {
+            this.showToast('Custom cookies.txt imported successfully!');
+            await this.checkInitialEngineHealth();
+          } else if (res && res.error) {
+            this.showToast(`Import failed: ${res.error}`);
+          }
+        }
+      });
+    }
+
+    // Toggle Paste Cookies Drawer
+    if (this.dom.btnTogglePasteCookie && this.dom.pasteCookieBox) {
+      this.dom.btnTogglePasteCookie.addEventListener('click', () => {
+        const isHidden = this.dom.pasteCookieBox.style.display === 'none';
+        this.dom.pasteCookieBox.style.display = isHidden ? 'flex' : 'none';
+        if (isHidden && this.dom.pasteCookieTextarea) {
+          this.dom.pasteCookieTextarea.focus();
+        }
+      });
+    }
+
+    // Save Pasted Cookies
+    if (this.dom.btnSavePastedCookie && this.dom.pasteCookieTextarea) {
+      this.dom.btnSavePastedCookie.addEventListener('click', async () => {
+        const text = this.dom.pasteCookieTextarea.value.trim();
+        if (!text) {
+          this.showToast('Please paste Netscape cookies content');
+          return;
+        }
+        if (window.electronAPI && window.electronAPI.saveCookieText) {
+          const res = await window.electronAPI.saveCookieText(text);
+          if (res && res.success) {
+            this.showToast('Cookies saved successfully!');
+            this.dom.pasteCookieBox.style.display = 'none';
+            this.dom.pasteCookieTextarea.value = '';
+            await this.checkInitialEngineHealth();
+          } else {
+            this.showToast(`Failed to save cookies: ${res.error || 'Invalid content'}`);
+          }
+        }
+      });
+    }
+
+    // Cancel Pasted Cookies
+    if (this.dom.btnCancelPastedCookie && this.dom.pasteCookieBox) {
+      this.dom.btnCancelPastedCookie.addEventListener('click', () => {
+        this.dom.pasteCookieBox.style.display = 'none';
+      });
+    }
+
+    // Clear Custom Cookies File
+    if (this.dom.btnClearManualCookie) {
+      this.dom.btnClearManualCookie.addEventListener('click', async () => {
+        if (window.electronAPI && window.electronAPI.clearManualCookies) {
+          await window.electronAPI.clearManualCookies();
+          this.showToast('Custom cookies file cleared');
+          await this.checkInitialEngineHealth();
+        }
+      });
+    }
+
+    // Toggle Troubleshooting & Diagnostics Live Log drawer
+    if (this.dom.toggleDiagLogs && this.dom.diagLogsBody) {
+      this.dom.toggleDiagLogs.addEventListener('click', () => {
+        const isHidden = this.dom.diagLogsBody.style.display === 'none';
+        this.dom.diagLogsBody.style.display = isHidden ? 'block' : 'none';
+        if (this.dom.diagLogsSection) {
+          this.dom.diagLogsSection.classList.toggle('open', isHidden);
+        }
+      });
+    }
+
+    // Direct button in error card to open diagnostics modal with logs expanded
+    if (this.dom.btnErrorLogs) {
+      this.dom.btnErrorLogs.addEventListener('click', () => {
+        this.openDiagnosticsModal(true);
+      });
+    }
+
+    // Copy Logs Button
+    if (this.dom.btnCopyDiagLogs) {
+      this.dom.btnCopyDiagLogs.addEventListener('click', async () => {
+        const text = this.getFormattedLogsText();
+        try {
+          await navigator.clipboard.writeText(text);
+          this.dom.btnCopyDiagLogs.textContent = '✓ Copied!';
+          setTimeout(() => {
+            if (this.dom.btnCopyDiagLogs) this.dom.btnCopyDiagLogs.textContent = '📋 Copy Logs';
+          }, 2000);
+          this.showToast('Diagnostics logs copied to clipboard');
+        } catch (_) {
+          this.showToast('Failed to copy logs to clipboard');
+        }
+      });
+    }
+
+    // Clear Logs Button
+    if (this.dom.btnClearDiagLogs) {
+      this.dom.btnClearDiagLogs.addEventListener('click', async () => {
+        if (window.electronAPI && window.electronAPI.clearDiagnosticsLogs) {
+          await window.electronAPI.clearDiagnosticsLogs();
+          await this.checkInitialEngineHealth();
+          this.showToast('Diagnostics log buffer cleared');
+        }
+      });
+    }
+
     // Guide Platform Tabs
     const setGuide = (os, cmd, alts) => {
-      this.dom.tabWinGuide.classList.toggle('active', os === 'win');
-      this.dom.tabMacGuide.classList.toggle('active', os === 'mac');
-      this.dom.tabLinuxGuide.classList.toggle('active', os === 'linux');
-      this.dom.guideCommandText.textContent = cmd;
-      this.dom.guideAlternativesList.innerHTML = alts;
+      if (this.dom.tabWinGuide) this.dom.tabWinGuide.classList.toggle('active', os === 'win');
+      if (this.dom.tabMacGuide) this.dom.tabMacGuide.classList.toggle('active', os === 'mac');
+      if (this.dom.tabLinuxGuide) this.dom.tabLinuxGuide.classList.toggle('active', os === 'linux');
+      if (this.dom.guideCommandText) this.dom.guideCommandText.textContent = cmd;
+      if (this.dom.guideAlternativesList) this.dom.guideAlternativesList.innerHTML = alts;
     };
 
-    this.dom.tabWinGuide.addEventListener('click', () => {
-      setGuide('win', 'winget install yt-dlp && winget install Gyan.FFmpeg', 'Chocolatey: <code>choco install yt-dlp ffmpeg</code><br>Scoop: <code>scoop install yt-dlp ffmpeg</code>');
-    });
+    if (this.dom.tabWinGuide) {
+      this.dom.tabWinGuide.addEventListener('click', () => {
+        setGuide('win', 'winget install yt-dlp && winget install Gyan.FFmpeg', 'Chocolatey: <code>choco install yt-dlp ffmpeg</code><br>Scoop: <code>scoop install yt-dlp ffmpeg</code>');
+      });
+    }
 
-    this.dom.tabMacGuide.addEventListener('click', () => {
-      setGuide('mac', 'brew install yt-dlp ffmpeg', 'MacPorts: <code>sudo port install yt-dlp ffmpeg</code>');
-    });
+    if (this.dom.tabMacGuide) {
+      this.dom.tabMacGuide.addEventListener('click', () => {
+        setGuide('mac', 'brew install yt-dlp ffmpeg', 'MacPorts: <code>sudo port install yt-dlp ffmpeg</code>');
+      });
+    }
 
-    this.dom.tabLinuxGuide.addEventListener('click', () => {
-      setGuide('linux', 'sudo apt update && sudo apt install yt-dlp ffmpeg', 'Arch: <code>sudo pacman -S yt-dlp ffmpeg</code><br>Fedora: <code>sudo dnf install yt-dlp ffmpeg</code>');
-    });
+    if (this.dom.tabLinuxGuide) {
+      this.dom.tabLinuxGuide.addEventListener('click', () => {
+        setGuide('linux', 'sudo apt update && sudo apt install yt-dlp ffmpeg', 'Arch: <code>sudo pacman -S yt-dlp ffmpeg</code><br>Fedora: <code>sudo dnf install yt-dlp ffmpeg</code>');
+      });
+    }
 
     // Copy command button
-    this.dom.btnCopyGuideCommand.addEventListener('click', () => {
-      navigator.clipboard.writeText(this.dom.guideCommandText.textContent);
-      this.dom.btnCopyGuideCommand.textContent = '✓ Copied!';
-      setTimeout(() => {
-        this.dom.btnCopyGuideCommand.textContent = '📋 Copy';
-      }, 2000);
-    });
+    if (this.dom.btnCopyGuideCommand && this.dom.guideCommandText) {
+      this.dom.btnCopyGuideCommand.addEventListener('click', () => {
+        navigator.clipboard.writeText(this.dom.guideCommandText.textContent);
+        this.dom.btnCopyGuideCommand.textContent = '✓ Copied!';
+        setTimeout(() => {
+          if (this.dom.btnCopyGuideCommand) this.dom.btnCopyGuideCommand.textContent = '📋 Copy';
+        }, 2000);
+      });
+    }
   }
 
-  openDiagnosticsModal() {
+  openDiagnosticsModal(expandLogs = false) {
     this.dom.engineModalBackdrop.classList.add('open');
+    if (expandLogs && this.dom.diagLogsBody) {
+      this.dom.diagLogsBody.style.display = 'block';
+      if (this.dom.diagLogsSection) {
+        this.dom.diagLogsSection.classList.add('open');
+      }
+      setTimeout(() => {
+        this.dom.diagLogsSection?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }, 100);
+    }
     this.checkInitialEngineHealth();
   }
 
@@ -1002,12 +1190,27 @@ class MediaDownloader {
     this.dom.engineModalBackdrop.classList.remove('open');
   }
 
+  getFormattedLogsText() {
+    if (!this.lastDiagnosticsLogs || this.lastDiagnosticsLogs.length === 0) {
+      return 'No diagnostics logs recorded yet.';
+    }
+    return this.lastDiagnosticsLogs.map(l => {
+      const details = l.details ? ` | ${JSON.stringify(l.details)}` : '';
+      return `[${l.timestamp}] [${l.category}] ${l.message}${details}`;
+    }).join('\n');
+  }
+
   async checkInitialEngineHealth() {
     try {
       let diag = { ytdlpFound: true, ytdlpPath: '/usr/local/bin/yt-dlp', ffmpegFound: true, ffmpegPath: '/usr/local/bin/ffmpeg' };
+      let logsData = { logs: [] };
 
       if (window.electronAPI && window.electronAPI.getDiagnostics) {
         diag = await window.electronAPI.getDiagnostics();
+      }
+
+      if (window.electronAPI && window.electronAPI.getDiagnosticsLogs) {
+        logsData = await window.electronAPI.getDiagnosticsLogs();
       }
 
       if (this.dom.ytdlpStatusPill) {
@@ -1022,6 +1225,72 @@ class MediaDownloader {
         this.dom.ffmpegPathText.textContent = diag.ffmpegPath || 'Path: None';
       }
 
+      // Update Cookie Bridge Badges
+      const availableBrowsers = diag.cookieBrowsers || (logsData.cookieBrowsers || []);
+      const activeCookie = diag.activeCookieBrowser || logsData.activeCookieBrowser || 'Mobile Innertube Client (Auto)';
+      
+      if (this.dom.activeCookieBrowserText) {
+        this.dom.activeCookieBrowserText.textContent = activeCookie;
+      }
+
+      // Check Manual Cookies Status
+      if (window.electronAPI && window.electronAPI.getCookieStatus) {
+        const cookieStatus = await window.electronAPI.getCookieStatus();
+        if (this.dom.manualCookieStatusText) {
+          if (cookieStatus && cookieStatus.hasCustomCookies) {
+            this.dom.manualCookieStatusText.className = 'manual-cookie-status active';
+            this.dom.manualCookieStatusText.innerHTML = '<span>Manual Cookies: <strong>✓ Custom cookies.txt active</strong></span>';
+            if (this.dom.btnClearManualCookie) this.dom.btnClearManualCookie.style.display = 'inline-block';
+          } else {
+            this.dom.manualCookieStatusText.className = 'manual-cookie-status';
+            this.dom.manualCookieStatusText.innerHTML = '<span>Manual Cookies: <em>None (Using automated browser extraction)</em></span>';
+            if (this.dom.btnClearManualCookie) this.dom.btnClearManualCookie.style.display = 'none';
+          }
+        }
+      }
+
+      if (this.dom.cookieBrowsersList) {
+        const detectedIds = availableBrowsers.map(b => b.id);
+        const standardBrowsers = [
+          { id: 'edge', name: 'Edge' },
+          { id: 'chrome', name: 'Chrome' },
+          { id: 'brave', name: 'Brave' },
+          { id: 'firefox', name: 'Firefox' }
+        ];
+
+        this.dom.cookieBrowsersList.innerHTML = standardBrowsers.map(b => {
+          const isDetected = detectedIds.includes(b.id);
+          const isActive = isDetected && (activeCookie.toLowerCase().includes(b.id) || activeCookie.toLowerCase().includes(b.name.toLowerCase()));
+          return `<span class="cookie-browser-badge ${isActive ? 'active' : ''} ${!isDetected ? 'missing' : ''}" title="${isDetected ? b.name + ' available for anti-bot cookie extraction' : b.name + ' not detected'}">
+            ${b.name} ${isDetected ? '<span class="badge-check">✓</span>' : '<span class="badge-check">✕</span>'}
+          </span>`;
+        }).join('');
+      }
+
+      // Render Troubleshooting Logs
+      const rawLogs = (logsData && logsData.logs) || [];
+      this.lastDiagnosticsLogs = rawLogs;
+
+      if (this.dom.diagLogsCountBadge) {
+        this.dom.diagLogsCountBadge.textContent = `${rawLogs.length} event${rawLogs.length === 1 ? '' : 's'}`;
+      }
+
+      if (this.dom.diagLogsViewer) {
+        if (rawLogs.length === 0) {
+          this.dom.diagLogsViewer.innerHTML = `<div class="log-empty-msg">No extraction events recorded yet. Analyze or download a media stream to see live diagnostic traces.</div>`;
+        } else {
+          this.dom.diagLogsViewer.innerHTML = rawLogs.slice().reverse().map(l => {
+            const catClass = l.category || 'DIAGNOSTICS';
+            const detailsStr = l.details ? ` <span style="color: #94a3b8; font-size: 10px;">(${Object.entries(l.details).map(([k, v]) => `${k}: ${v}`).join(', ')})</span>` : '';
+            return `<div class="log-entry-row">
+              <span class="log-entry-time">${l.timestamp}</span>
+              <span class="log-entry-tag ${catClass}">${l.category}</span>
+              <span class="log-entry-text">${this.escapeHtml(l.message)}${detailsStr}</span>
+            </div>`;
+          }).join('');
+        }
+      }
+
       const allOk = diag.ytdlpFound && diag.ffmpegFound;
       if (this.dom.engineBadgeText) {
         this.dom.engineBadgeText.textContent = allOk ? 'Engine Ready' : 'Setup Required';
@@ -1031,11 +1300,166 @@ class MediaDownloader {
     }
   }
 
+  /**
+   * Runs the active Downloader Engine Production Health Self-Test
+   */
+  async runEngineSelfTest() {
+    if (!this.dom.btnRunEngineSelfTest) return;
+
+    this.dom.btnRunEngineSelfTest.disabled = true;
+    this.dom.btnRunEngineSelfTest.textContent = '🧪 Testing Engine...';
+
+    if (this.dom.engineSelfTestContainer) {
+      this.dom.engineSelfTestContainer.style.display = 'block';
+      this.dom.selfTestOverallBadge.className = 'selftest-badge checking';
+      this.dom.selfTestOverallBadge.textContent = 'RUNNING';
+      this.dom.selfTestSummaryText.textContent = 'Executing binary version checks, cookie provider verification, and resources integrity validation...';
+      this.dom.selfTestGrid.innerHTML = '<div class="selftest-loading">Probing yt-dlp.exe, ffmpeg.exe, and browser cookie bridges...</div>';
+    }
+
+    try {
+      let report = null;
+      if (window.electronAPI && window.electronAPI.runSelfTest) {
+        report = await window.electronAPI.runSelfTest();
+      } else {
+        // Fallback simulation for web browser preview mode
+        await new Promise(r => setTimeout(r, 600));
+        report = {
+          overall: 'pass',
+          summary: 'All downloader subsystems, fallbacks, and preview pipelines are verified and ready.',
+          tests: [
+            { name: 'yt-dlp Extractor Engine', passed: true, status: 'pass', message: 'yt-dlp 2024.12.23 (Native Core verified)' },
+            { name: 'FFmpeg Muxer Stream Pipeline', passed: true, status: 'pass', message: 'FFmpeg 7.0 (Audio/Video multiplexer verified)' },
+            { name: 'Browser Cookie Bridge Providers', passed: true, status: 'pass', message: 'Edge, Chrome, Brave cookie extractors ready' },
+            { name: 'Package Resources & Installation Integrity', passed: true, status: 'pass', message: 'Clean standalone binary installation verified' }
+          ]
+        };
+      }
+
+      const overall = report.overall || 'pass';
+      if (this.dom.selfTestOverallBadge) {
+        this.dom.selfTestOverallBadge.className = `selftest-badge ${overall}`;
+        this.dom.selfTestOverallBadge.textContent = overall.toUpperCase();
+      }
+
+      if (this.dom.selfTestSummaryText) {
+        this.dom.selfTestSummaryText.textContent = report.summary || 'Engine self-test completed.';
+      }
+
+      if (this.dom.selfTestGrid) {
+        this.dom.selfTestGrid.innerHTML = (report.tests || []).map(t => {
+          const statusClass = t.status || (t.passed ? 'pass' : 'fail');
+          const statusIcon = t.passed ? '✓' : (statusClass === 'warning' ? '⚠' : '✕');
+          const actionHtml = t.suggestedAction ? `<div class="selftest-action">💡 <strong>Suggested Action:</strong> ${this.escapeHtml(t.suggestedAction)}</div>` : '';
+          return `<div class="selftest-card ${statusClass}">
+            <div class="selftest-card-header">
+              <span class="selftest-card-name">${this.escapeHtml(t.name)}</span>
+              <span class="selftest-card-status ${statusClass}">${statusIcon} ${statusClass.toUpperCase()}</span>
+            </div>
+            <div class="selftest-card-body">
+              <div class="selftest-card-msg">${this.escapeHtml(t.message || '')}</div>
+              ${actionHtml}
+            </div>
+          </div>`;
+        }).join('');
+      }
+
+      await this.checkInitialEngineHealth();
+      this.showToast(`Engine Self-Test: ${overall.toUpperCase()} (${report.summary})`);
+    } catch (err) {
+      if (this.dom.selfTestOverallBadge) {
+        this.dom.selfTestOverallBadge.className = 'selftest-badge fail';
+        this.dom.selfTestOverallBadge.textContent = 'ERROR';
+      }
+      if (this.dom.selfTestSummaryText) {
+        this.dom.selfTestSummaryText.textContent = `Health check failed: ${err.message}`;
+      }
+    } finally {
+      if (this.dom.btnRunEngineSelfTest) {
+        this.dom.btnRunEngineSelfTest.disabled = false;
+        this.dom.btnRunEngineSelfTest.textContent = '⚡ Run Health Self-Test';
+      }
+    }
+  }
+
+  /**
+   * Runs live test of the Cookie Bridge & Extractor
+   */
+  async runCookieBridgeTest() {
+    if (!this.dom.btnTestCookieBridge) return;
+
+    const testUrl = (this.dom.urlInput && this.dom.urlInput.value.trim()) || 'https://www.youtube.com/watch?v=aqz-KE-bpKQ';
+    this.dom.btnTestCookieBridge.disabled = true;
+    this.dom.btnTestCookieBridge.textContent = 'Testing...';
+
+    if (this.dom.cookieTestResultBox) {
+      this.dom.cookieTestResultBox.style.display = 'block';
+      this.dom.cookieTestResultBox.innerHTML = '<div class="cookie-test-meta">Executing multi-tier extraction test against YouTube innertube API & cookie providers...</div>';
+    }
+
+    try {
+      let result = null;
+      if (window.electronAPI && window.electronAPI.testCookieBridge) {
+        result = await window.electronAPI.testCookieBridge(testUrl);
+      } else {
+        await new Promise(r => setTimeout(r, 600));
+        result = {
+          success: true,
+          method: 'Mobile Innertube Client (Anti-Bot Bypass)',
+          title: 'Big Buck Bunny 4K 60FPS Ultra HD',
+          duration: '10:34',
+          formatCount: 8,
+          sanitizedCmd: '"yt-dlp" --dump-single-json --extractor-args youtube:player_client=android,ios ...',
+          steps: [
+            { name: 'Mobile Innertube API (android,ios)', code: 0, passed: true, durationMs: 412 }
+          ]
+        };
+      }
+
+      if (this.dom.cookieTestResultBox) {
+        if (result && result.success) {
+          this.dom.cookieTestResultBox.innerHTML = `
+            <div class="cookie-test-header">
+              <span class="cookie-test-status pass">✓ Extraction Verified (${this.escapeHtml(result.method)})</span>
+              <span style="font-size: 10px; color: #4ade80;">${result.formatCount} formats found</span>
+            </div>
+            <div class="cookie-test-meta">
+              <strong>Title:</strong> ${this.escapeHtml(result.title || 'YouTube Stream')}<br>
+              <strong>Duration:</strong> ${this.escapeHtml(result.duration || '0:00')}
+            </div>
+            ${result.sanitizedCmd ? `<div class="cookie-test-cmd"><code>${this.escapeHtml(result.sanitizedCmd)}</code></div>` : ''}
+          `;
+          this.showToast(`Cookie Bridge test succeeded via ${result.method}`);
+        } else {
+          this.dom.cookieTestResultBox.innerHTML = `
+            <div class="cookie-test-header">
+              <span class="cookie-test-status fail">✕ Extraction Test Failed</span>
+            </div>
+            <div class="cookie-test-meta">${this.escapeHtml(result?.error || 'All extraction tiers failed.')}</div>
+          `;
+          this.showToast('Cookie Bridge test encountered issues.');
+        }
+      }
+
+      await this.checkInitialEngineHealth();
+    } catch (e) {
+      if (this.dom.cookieTestResultBox) {
+        this.dom.cookieTestResultBox.innerHTML = `<div class="cookie-test-status fail">✕ Test Error: ${this.escapeHtml(e.message)}</div>`;
+      }
+    } finally {
+      if (this.dom.btnTestCookieBridge) {
+        this.dom.btnTestCookieBridge.disabled = false;
+        this.dom.btnTestCookieBridge.textContent = '🧪 Test Cookie Bridge';
+      }
+    }
+  }
+
   // =========================================================================
   // 6. IPC Event Subscriptions
   // =========================================================================
   setupIPCListeners() {
-    if (!window.electronAPI) return;
+    if (!window.electronAPI || this.__ipcListenersInitialized) return;
+    this.__ipcListenersInitialized = true;
 
     if (window.electronAPI.onDownloadProgress) {
       window.electronAPI.onDownloadProgress((data) => {

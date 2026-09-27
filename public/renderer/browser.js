@@ -208,7 +208,7 @@ class YASBrowser {
     return `#${((1 << 24) + (outR << 16) + (outG << 8) + outB).toString(16).slice(1)}`;
   }
 
-  setColorMode(mode, save = true, showFeedback = false) {
+  setColorMode(mode, save = true) {
     const cleanMode = (mode === 'light') ? 'light' : 'dark';
     this.colorMode = cleanMode;
     document.documentElement.setAttribute('data-color-mode', cleanMode);
@@ -232,15 +232,11 @@ class YASBrowser {
     if (save) {
       localStorage.setItem('yas_color_mode', cleanMode);
     }
-
-    if (showFeedback) {
-      this.showToast(`Switched to ${cleanMode === 'light' ? 'Light Theme ☀️' : 'Dark Theme 🌙'}`);
-    }
   }
 
   toggleColorMode() {
     const nextMode = this.colorMode === 'dark' ? 'light' : 'dark';
-    this.setColorMode(nextMode, true, true);
+    this.setColorMode(nextMode, true);
   }
 
   initTheme() {
@@ -308,33 +304,19 @@ class YASBrowser {
     }
   }
 
-  applyPresetTheme(presetId, colorHex, showFeedback = true) {
+  applyPresetTheme(presetId, colorHex) {
     this.currentTheme = presetId;
     document.documentElement.setAttribute('data-theme', presetId);
     localStorage.setItem('yas_theme', presetId);
     
-    // Also calculate variables so all UI parts match
-    this.applyCustomAccent(colorHex, true);
+    // Also calculate variables so all UI parts match without overriding theme name
+    this.applyCustomAccent(colorHex, false);
 
     // Update active highlight in preset cards
     document.querySelectorAll('.preset-theme-card').forEach((card) => {
       const isSelected = card.dataset.presetId === presetId || (card.dataset.color && card.dataset.color.toLowerCase() === colorHex.toLowerCase());
       card.classList.toggle('active', Boolean(isSelected));
     });
-
-    if (showFeedback) {
-      const presetNames = {
-        'electric-violet': 'Electric Violet (Arc Signature)',
-        'cyber-cyan': 'Cyber Cyan (Brave Neon)',
-        'sunset-rose': 'Sunset Rose',
-        'emerald-matrix': 'Emerald Matrix',
-        'obsidian-amber': 'Obsidian Amber',
-        'royal-sapphire': 'Royal Sapphire',
-        'neon-lime': 'Neon Lime',
-        'amethyst-purple': 'Amethyst Velvet'
-      };
-      this.showToast(`Theme applied: ${presetNames[presetId] || presetId}`);
-    }
   }
 
   // =========================================================================
@@ -366,12 +348,12 @@ class YASBrowser {
     // Color Mode (Dark vs Light) Selection Cards in Settings
     if (this.dom.modeOptionDark) {
       this.dom.modeOptionDark.addEventListener('click', () => {
-        this.setColorMode('dark', true, true);
+        this.setColorMode('dark', true);
       });
     }
     if (this.dom.modeOptionLight) {
       this.dom.modeOptionLight.addEventListener('click', () => {
-        this.setColorMode('light', true, true);
+        this.setColorMode('light', true);
       });
     }
 
@@ -441,7 +423,7 @@ class YASBrowser {
     // Reset Default Theme Button
     if (this.dom.btnResetThemeDefault) {
       this.dom.btnResetThemeDefault.addEventListener('click', () => {
-        this.applyPresetTheme('electric-violet', '#6366f1', true);
+        this.applyPresetTheme('electric-violet', '#6366f1');
       });
     }
 
@@ -451,7 +433,7 @@ class YASBrowser {
         const presetId = card.dataset.presetId;
         const color = card.dataset.color || '#6366f1';
         if (presetId) {
-          this.applyPresetTheme(presetId, color, true);
+          this.applyPresetTheme(presetId, color);
         }
       });
     });
@@ -558,7 +540,10 @@ class YASBrowser {
     if (this.dom.btnClearBrowsingData) {
       this.dom.btnClearBrowsingData.addEventListener('click', () => {
         this.bookmarks.clear();
-        this.updateBookmarkButton(false);
+        if (this.dom.bookmarkBtn) {
+          this.dom.bookmarkBtn.classList.remove('active');
+        }
+        localStorage.removeItem('yas_bookmarks');
         this.showToast('Browsing cache and local history cleared successfully');
       });
     }
@@ -933,20 +918,22 @@ class YASBrowser {
       `;
       const iframe = iframeWrap.querySelector('iframe');
 
-      iframe.addEventListener('load', () => {
-        this.onTabStopLoading(tab.id);
-        this.simulateAdBlockingForTab(tab);
-        try {
-          const frameDoc = iframe.contentDocument || iframe.contentWindow?.document;
-          if (frameDoc && frameDoc.title) {
-            this.onTabTitleUpdated(tab.id, frameDoc.title);
+      if (iframe) {
+        iframe.addEventListener('load', () => {
+          this.onTabStopLoading(tab.id);
+          this.simulateAdBlockingForTab(tab);
+          try {
+            const frameDoc = iframe.contentDocument || iframe.contentWindow?.document;
+            if (frameDoc && frameDoc.title) {
+              this.onTabTitleUpdated(tab.id, frameDoc.title);
+            }
+          } catch (_) {
+            // Cross-origin title extraction guard
+            const parsed = this.parseUrlDomain(url);
+            this.onTabTitleUpdated(tab.id, parsed);
           }
-        } catch (_) {
-          // Cross-origin title extraction guard
-          const parsed = this.parseUrlDomain(url);
-          this.onTabTitleUpdated(tab.id, parsed);
-        }
-      });
+        });
+      }
 
       container.appendChild(iframeWrap);
       tab.viewElement = iframe;
@@ -1554,19 +1541,21 @@ class YASBrowser {
   // 5. Omnibox & Navigation Controls
   // =========================================================================
   setupNavigationControls() {
-    this.dom.newTabBtn.addEventListener('click', () => {
-      this.createTab({
-        title: 'New Tab',
-        url: 'yas://newtab',
-        favicon: '✨',
-        isInternal: true
+    if (this.dom.newTabBtn) {
+      this.dom.newTabBtn.addEventListener('click', () => {
+        this.createTab({
+          title: 'New Tab',
+          url: 'yas://newtab',
+          favicon: '✨',
+          isInternal: true
+        });
       });
-    });
+    }
 
-    this.dom.btnBack.addEventListener('click', () => this.navigateBack());
-    this.dom.btnForward.addEventListener('click', () => this.navigateForward());
-    this.dom.btnReload.addEventListener('click', () => this.reloadCurrentTab());
-    this.dom.btnHome.addEventListener('click', () => this.navigateHome());
+    if (this.dom.btnBack) this.dom.btnBack.addEventListener('click', () => this.navigateBack());
+    if (this.dom.btnForward) this.dom.btnForward.addEventListener('click', () => this.navigateForward());
+    if (this.dom.btnReload) this.dom.btnReload.addEventListener('click', () => this.reloadCurrentTab());
+    if (this.dom.btnHome) this.dom.btnHome.addEventListener('click', () => this.navigateHome());
 
     if (this.dom.bookmarkBtn) {
       this.dom.bookmarkBtn.addEventListener('click', () => {
@@ -1582,6 +1571,7 @@ class YASBrowser {
           this.dom.bookmarkBtn.classList.add('active');
           this.showToast('Page added to bookmarks');
         }
+        localStorage.setItem('yas_bookmarks', JSON.stringify(Array.from(this.bookmarks)));
       });
     }
   }
@@ -1590,33 +1580,37 @@ class YASBrowser {
     const input = this.dom.omniboxInput;
     const clearBtn = this.dom.omniboxClearBtn;
 
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        const query = input.value.trim();
-        if (query) {
-          this.navigateToQuery(query);
-          input.blur();
+    if (input) {
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          const query = input.value.trim();
+          if (query) {
+            this.navigateToQuery(query);
+            input.blur();
+          }
         }
-      }
-    });
+      });
 
-    input.addEventListener('input', () => {
-      if (clearBtn) {
-        clearBtn.style.display = input.value.length > 0 ? 'flex' : 'none';
-      }
-    });
+      input.addEventListener('input', () => {
+        if (clearBtn) {
+          clearBtn.style.display = input.value.length > 0 ? 'flex' : 'none';
+        }
+      });
 
-    if (clearBtn) {
-      clearBtn.addEventListener('click', () => {
-        input.value = '';
-        input.focus();
-        clearBtn.style.display = 'none';
+      input.addEventListener('focus', () => {
+        input.select();
       });
     }
 
-    input.addEventListener('focus', () => {
-      input.select();
-    });
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => {
+        if (input) {
+          input.value = '';
+          input.focus();
+        }
+        clearBtn.style.display = 'none';
+      });
+    }
   }
 
   updateOmniboxForTab(tab) {
@@ -1646,6 +1640,12 @@ class YASBrowser {
     if (this.dom.bookmarkBtn) {
       this.dom.bookmarkBtn.classList.toggle('active', this.bookmarks.has(tab.url));
     }
+  }
+
+  updateBookmarkButtonState() {
+    const tab = this.getActiveTab();
+    if (!tab || !this.dom.bookmarkBtn) return;
+    this.dom.bookmarkBtn.classList.toggle('active', this.bookmarks.has(tab.url));
   }
 
   updateNavButtons(tab) {
@@ -1916,6 +1916,11 @@ class YASBrowser {
         e.preventDefault();
         if (window.mediaDownloader && window.mediaDownloader.togglePanel) {
           window.mediaDownloader.togglePanel();
+        }
+      } else if (isCmdOrCtrl && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        if (this.dom.bookmarkBtn) {
+          this.dom.bookmarkBtn.click();
         }
       } else if (isCmdOrCtrl && e.key === ',') {
         e.preventDefault();
