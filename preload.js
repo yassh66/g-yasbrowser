@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectDirectory: () => ipcRenderer.invoke('dialog:choose-directory'),
   checkDependencies: () => ipcRenderer.invoke('system:check-dependencies'),
   getDiagnostics: () => ipcRenderer.invoke('system:check-dependencies'),
+  downloadBinaries: () => ipcRenderer.invoke('system:install-binaries'),
   copyToClipboard: (text) => ipcRenderer.invoke('system:copy-to-clipboard', text),
   
   // Context Menu & Tab IPC Bridge

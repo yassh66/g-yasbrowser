@@ -422,6 +422,128 @@ ipcMain.handle('system:check-dependencies', async () => {
   }
 });
 
+/**
+ * IPC handler to automatically install / download missing binaries into %LOCALAPPDATA%\YASBrowser\bin
+ */
+ipcMain.handle('system:install-binaries', async () => {
+  try {
+    const isWin = process.platform === 'win32';
+    if (!isWin) {
+      return { success: false, error: 'Automatic binary setup is currently designed for Windows.' };
+    }
+
+    const home = os.homedir();
+    const localAppData = process.env.LOCALAPPDATA || (home ? path.join(home, 'AppData', 'Local') : '');
+    const targetBinDir = path.join(localAppData, 'YASBrowser', 'bin');
+
+    if (!fs.existsSync(targetBinDir)) {
+      fs.mkdirSync(targetBinDir, { recursive: true });
+    }
+
+    const ytdlpDest = path.join(targetBinDir, 'yt-dlp.exe');
+    const ffmpegDest = path.join(targetBinDir, 'ffmpeg.exe');
+
+    // Download helper
+    const downloadFileAsync = (url, destPath) => {
+      return new Promise((resolve, reject) => {
+        import('https').then(({ default: https }) => {
+          https.get(url, { headers: { 'User-Agent': 'YAS-Browser' } }, (res) => {
+            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+              return downloadFileAsync(res.headers.location, destPath).then(resolve).catch(reject);
+            }
+            if (res.statusCode !== 200) {
+              return reject(new Error(`HTTP status ${res.statusCode}`));
+            }
+            const fileStream = fs.createWriteStream(destPath);
+            res.pipe(fileStream);
+            fileStream.on('finish', () => {
+              fileStream.close();
+              resolve();
+            });
+            fileStream.on('error', (e) => {
+              fs.unlink(destPath, () => {});
+              reject(e);
+            });
+          }).on('error', (e) => {
+            fs.unlink(destPath, () => {});
+            reject(e);
+          });
+        });
+      });
+    };
+
+    // 1. Download yt-dlp.exe if missing
+    if (!fs.existsSync(ytdlpDest) || fs.statSync(ytdlpDest).size < 1000000) {
+      const tempYt = path.join(targetBinDir, 'yt-dlp.tmp');
+      await downloadFileAsync('https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe', tempYt);
+      if (fs.existsSync(ytdlpDest)) fs.unlinkSync(ytdlpDest);
+      fs.renameSync(tempYt, ytdlpDest);
+    }
+
+    // 2. Download ffmpeg.exe if missing
+    if (!fs.existsSync(ffmpegDest) || fs.statSync(ffmpegDest).size < 1000000) {
+      const tempZip = path.join(targetBinDir, 'ffmpeg.zip');
+      const tempExt = path.join(targetBinDir, '_ffmpeg_tmp');
+      if (!fs.existsSync(tempExt)) fs.mkdirSync(tempExt, { recursive: true });
+
+      try {
+        await downloadFileAsync('https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip', tempZip);
+        try {
+          const { execSync } = await import('child_process');
+          try {
+            execSync(`tar -xf "${tempZip}" -C "${tempExt}"`, { stdio: 'ignore' });
+          } catch (_) {
+            execSync(`powershell -NoProfile -Command "Expand-Archive -Path '${tempZip}' -DestinationPath '${tempExt}' -Force"`, { stdio: 'ignore' });
+          }
+
+          const findExe = (dir) => {
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            for (const e of entries) {
+              const full = path.join(dir, e.name);
+              if (e.isDirectory()) {
+                const res = findExe(full);
+                if (res) return res;
+              } else if (e.name.toLowerCase() === 'ffmpeg.exe') {
+                return full;
+              }
+            }
+            return null;
+          };
+
+          const found = findExe(tempExt);
+          if (found) {
+            fs.copyFileSync(found, ffmpegDest);
+          }
+        } catch (e) {
+          console.error('[YAS Main] Error unpacking ffmpeg:', e);
+        }
+      } finally {
+        try { fs.unlinkSync(tempZip); } catch (_) {}
+        try { fs.rmSync(tempExt, { recursive: true, force: true }); } catch (_) {}
+      }
+    }
+
+    // Re-check availability
+    const ytdlpInfo = await checkBinaryAvailability('yt-dlp');
+    const ffmpegInfo = await checkBinaryAvailability('ffmpeg');
+
+    if (ytdlpInfo.available) cachedYtdlpPath = ytdlpInfo.path;
+    if (ffmpegInfo.available) cachedFfmpegPath = ffmpegInfo.path;
+
+    return {
+      success: true,
+      ytdlp: ytdlpInfo,
+      ffmpeg: ffmpegInfo
+    };
+  } catch (err) {
+    console.error('[YAS Main] Error during binary download:', err);
+    return {
+      success: false,
+      error: err.message
+    };
+  }
+});
+
 // -------------------------------------------------------------
 // Window Controls
 // -------------------------------------------------------------
