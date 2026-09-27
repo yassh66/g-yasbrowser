@@ -298,7 +298,7 @@
                   <div class="studio-title">Media Download Studio</div>
                   <div class="studio-engine-pill">
                     <span class="engine-live-dot"></span>
-                    <span class="studio-subtitle" id="engineStatusSubtitle">yt-dlp Native Engine Active</span>
+                    <span class="studio-subtitle" id="engineStatusSubtitle">High-Speed Engine Ready</span>
                   </div>
                 </div>
               </div>
@@ -322,12 +322,6 @@
                   <line x1="10" y1="14" x2="21" y2="3"></line>
                 </svg>
                 <span>Folder</span>
-              </button>
-
-              <!-- yt-dlp & FFmpeg Engine Diagnostics Badge -->
-              <button class="engine-badge" id="engineStatusBadge" title="yt-dlp & FFmpeg Engine Health & Installation Guide">
-                <span class="engine-dot"></span>
-                <span id="engineBadgeText">Engine OK</span>
               </button>
 
               <!-- Dedicated Complete Clear / Reset Button -->
@@ -411,7 +405,7 @@
                   <span class="badge-tag">1080p</span>
                 </button>
                 <div class="presets-info-pill">
-                  <span>⚡ Direct yt-dlp binary extraction & FFmpeg stream merging</span>
+                  <span>⚡ Studio Quality 4K Video & High-Bitrate Audio</span>
                 </div>
               </div>
             </div>
@@ -424,14 +418,14 @@
               <div class="analysis-spinner-wrap">
                 <div class="spinner-large"></div>
                 <div class="loading-phase-texts">
-                  <div class="loading-phase-title" id="loadingPhaseTitle">Inspecting Stream Manifests...</div>
-                  <div class="loading-phase-sub" id="loadingPhaseSub">Connecting to yt-dlp extractor to resolve formats</div>
+                  <div class="loading-phase-title" id="loadingPhaseTitle">Analyzing media...</div>
+                  <div class="loading-phase-sub" id="loadingPhaseSub">Connecting to media stream...</div>
                 </div>
               </div>
               <div class="loading-step-tracker">
-                <div class="tracker-step active" id="step1Dot"><span>1</span> URL Check</div>
+                <div class="tracker-step active" id="step1Dot"><span>1</span> Analyzing</div>
                 <div class="tracker-line"></div>
-                <div class="tracker-step" id="step2Dot"><span>2</span> Stream Matrix</div>
+                <div class="tracker-step" id="step2Dot"><span>2</span> Qualities</div>
                 <div class="tracker-line"></div>
                 <div class="tracker-step" id="step3Dot"><span>3</span> Ready</div>
               </div>
@@ -440,14 +434,12 @@
             <!-- Tailored Error State Box -->
             <div class="media-error-card" id="mediaErrorCard" style="display: none;">
               <div class="error-card-header">
-                <span class="error-icon">⚠️</span>
-                <span class="error-title" id="errorTitle">Unable to Analyze URL</span>
+                <span class="error-icon">ℹ️</span>
+                <span class="error-title" id="errorTitle">Notice</span>
               </div>
-              <p class="error-desc" id="errorDescription">Please check that the link is valid and publicly accessible.</p>
+              <p class="error-desc" id="errorDescription">Unable to process this media right now. Please try again later.</p>
               <div class="error-actions-row">
                 <button class="btn-error-retry" id="btnErrorRetry">Try Again</button>
-                <button class="btn-error-help" id="btnErrorGuide">Installation & Setup Guide</button>
-                <button class="btn-error-logs" id="btnErrorLogs">🔍 View Troubleshooting Logs</button>
               </div>
             </div>
 
@@ -493,15 +485,15 @@
 
                     <div class="media-specs-grid">
                       <div class="spec-item">
-                        <span class="spec-label">Engine</span>
-                        <span class="spec-val">yt-dlp Core</span>
+                        <span class="spec-label">Quality</span>
+                        <span class="spec-val">Up to 4K UHD</span>
                       </div>
                       <div class="spec-item">
-                        <span class="spec-label">Audio Muxing</span>
-                        <span class="spec-val">FFmpeg</span>
+                        <span class="spec-label">Audio</span>
+                        <span class="spec-val">Studio 320k</span>
                       </div>
                       <div class="spec-item">
-                        <span class="spec-label">Format Types</span>
+                        <span class="spec-label">Containers</span>
                         <span class="spec-val">MP4 / MP3</span>
                       </div>
                     </div>
@@ -1060,7 +1052,10 @@
                   <span class="cookie-card-icon">🍪</span>
                   <span class="diag-name">Browser Cookie Bridge (Anti-Bot Bypass)</span>
                 </div>
-                <span class="diag-status-pill installed" id="cookieBridgeStatusPill">Auto-Connected</span>
+                <div class="cookie-card-actions">
+                  <button class="btn-cookie-test" id="btnTestCookieBridge" title="Run live metadata extraction test on YouTube">🧪 Test Cookie Bridge</button>
+                  <span class="diag-status-pill installed" id="cookieBridgeStatusPill">Auto-Connected</span>
+                </div>
               </div>
               <div class="cookie-browsers-list" id="cookieBrowsersList">
                 <span class="cookie-browser-badge" data-browser="edge">Edge <span class="badge-check">✓</span></span>
@@ -1069,7 +1064,33 @@
                 <span class="cookie-browser-badge" data-browser="firefox">Firefox <span class="badge-check">✓</span></span>
               </div>
               <div class="cookie-card-desc" id="cookieBridgeDesc">
-                Active Source: <strong id="activeCookieBrowserText">Microsoft Edge (Auto)</strong> • Used automatically when YouTube or Instagram requests bot verification.
+                Active Source: <strong id="activeCookieBrowserText">Mobile Innertube Client (Auto Anti-Bot)</strong> • Automatically falls back to browser session cookies or custom cookies when required.
+              </div>
+
+              <!-- Manual Cookie Import & Fallback Controls -->
+              <div class="manual-cookies-row" id="manualCookiesRow">
+                <div class="manual-cookie-status" id="manualCookieStatusText">
+                  <span>Manual Cookies: <em>None (Using automated browser extraction)</em></span>
+                </div>
+                <div class="manual-cookie-buttons">
+                  <button class="btn-manual-cookie-import" id="btnImportCookieFile" title="Import a Netscape cookies.txt file">📁 Import cookies.txt</button>
+                  <button class="btn-manual-cookie-paste" id="btnTogglePasteCookie" title="Paste Netscape cookie text directly">📋 Paste Cookies</button>
+                  <button class="btn-manual-cookie-clear" id="btnClearManualCookie" style="display: none;" title="Remove custom cookies file">🗑 Clear</button>
+                </div>
+              </div>
+
+              <!-- Expandable Paste Cookie Box -->
+              <div class="paste-cookie-box" id="pasteCookieBox" style="display: none;">
+                <textarea class="paste-cookie-textarea custom-scrollbar" id="pasteCookieTextarea" placeholder="# Netscape HTTP Cookie File&#10;.youtube.com&#9;TRUE&#9;/&#9;TRUE&#9;1758954000&#9;VISITOR_INFO1_LIVE&#9;..."></textarea>
+                <div class="paste-cookie-actions">
+                  <button class="btn-save-pasted-cookie" id="btnSavePastedCookie">Save Cookies</button>
+                  <button class="btn-cancel-pasted-cookie" id="btnCancelPastedCookie">Cancel</button>
+                </div>
+              </div>
+
+              <!-- Cookie Test Result Live Box -->
+              <div class="cookie-test-result-box" id="cookieTestResultBox" style="display: none;">
+                <!-- Dynamically populated by JS -->
               </div>
             </div>
 

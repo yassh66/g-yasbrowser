@@ -918,20 +918,22 @@ class YASBrowser {
       `;
       const iframe = iframeWrap.querySelector('iframe');
 
-      iframe.addEventListener('load', () => {
-        this.onTabStopLoading(tab.id);
-        this.simulateAdBlockingForTab(tab);
-        try {
-          const frameDoc = iframe.contentDocument || iframe.contentWindow?.document;
-          if (frameDoc && frameDoc.title) {
-            this.onTabTitleUpdated(tab.id, frameDoc.title);
+      if (iframe) {
+        iframe.addEventListener('load', () => {
+          this.onTabStopLoading(tab.id);
+          this.simulateAdBlockingForTab(tab);
+          try {
+            const frameDoc = iframe.contentDocument || iframe.contentWindow?.document;
+            if (frameDoc && frameDoc.title) {
+              this.onTabTitleUpdated(tab.id, frameDoc.title);
+            }
+          } catch (_) {
+            // Cross-origin title extraction guard
+            const parsed = this.parseUrlDomain(url);
+            this.onTabTitleUpdated(tab.id, parsed);
           }
-        } catch (_) {
-          // Cross-origin title extraction guard
-          const parsed = this.parseUrlDomain(url);
-          this.onTabTitleUpdated(tab.id, parsed);
-        }
-      });
+        });
+      }
 
       container.appendChild(iframeWrap);
       tab.viewElement = iframe;
@@ -1539,19 +1541,21 @@ class YASBrowser {
   // 5. Omnibox & Navigation Controls
   // =========================================================================
   setupNavigationControls() {
-    this.dom.newTabBtn.addEventListener('click', () => {
-      this.createTab({
-        title: 'New Tab',
-        url: 'yas://newtab',
-        favicon: '✨',
-        isInternal: true
+    if (this.dom.newTabBtn) {
+      this.dom.newTabBtn.addEventListener('click', () => {
+        this.createTab({
+          title: 'New Tab',
+          url: 'yas://newtab',
+          favicon: '✨',
+          isInternal: true
+        });
       });
-    });
+    }
 
-    this.dom.btnBack.addEventListener('click', () => this.navigateBack());
-    this.dom.btnForward.addEventListener('click', () => this.navigateForward());
-    this.dom.btnReload.addEventListener('click', () => this.reloadCurrentTab());
-    this.dom.btnHome.addEventListener('click', () => this.navigateHome());
+    if (this.dom.btnBack) this.dom.btnBack.addEventListener('click', () => this.navigateBack());
+    if (this.dom.btnForward) this.dom.btnForward.addEventListener('click', () => this.navigateForward());
+    if (this.dom.btnReload) this.dom.btnReload.addEventListener('click', () => this.reloadCurrentTab());
+    if (this.dom.btnHome) this.dom.btnHome.addEventListener('click', () => this.navigateHome());
 
     if (this.dom.bookmarkBtn) {
       this.dom.bookmarkBtn.addEventListener('click', () => {
@@ -1576,33 +1580,37 @@ class YASBrowser {
     const input = this.dom.omniboxInput;
     const clearBtn = this.dom.omniboxClearBtn;
 
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        const query = input.value.trim();
-        if (query) {
-          this.navigateToQuery(query);
-          input.blur();
+    if (input) {
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          const query = input.value.trim();
+          if (query) {
+            this.navigateToQuery(query);
+            input.blur();
+          }
         }
-      }
-    });
+      });
 
-    input.addEventListener('input', () => {
-      if (clearBtn) {
-        clearBtn.style.display = input.value.length > 0 ? 'flex' : 'none';
-      }
-    });
+      input.addEventListener('input', () => {
+        if (clearBtn) {
+          clearBtn.style.display = input.value.length > 0 ? 'flex' : 'none';
+        }
+      });
 
-    if (clearBtn) {
-      clearBtn.addEventListener('click', () => {
-        input.value = '';
-        input.focus();
-        clearBtn.style.display = 'none';
+      input.addEventListener('focus', () => {
+        input.select();
       });
     }
 
-    input.addEventListener('focus', () => {
-      input.select();
-    });
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => {
+        if (input) {
+          input.value = '';
+          input.focus();
+        }
+        clearBtn.style.display = 'none';
+      });
+    }
   }
 
   updateOmniboxForTab(tab) {

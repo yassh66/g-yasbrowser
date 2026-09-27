@@ -18,6 +18,7 @@ import { fileURLToPath } from 'url';
 import { spawn, exec } from 'child_process';
 import fs from 'fs';
 import os from 'os';
+import { ExtractionManager } from './engine/extraction-manager.js';
 
 // Ensure Windows taskbar, notifications, and Alt+Tab correctly group under YAS Browser identity
 if (process.platform === 'win32') {
@@ -29,6 +30,7 @@ const __dirname = path.dirname(__filename);
 
 let mainWindow = null;
 const activeDownloads = new Map();
+const extractionManager = new ExtractionManager(app);
 
 // Shields & Ad-blocking status
 let shieldsEnabled = true;
@@ -628,6 +630,234 @@ ipcMain.handle('system:clear-diagnostics-logs', () => {
 });
 
 /**
+ * Manual Cookie File Management Helpers
+ */
+function getCustomCookiesPath() {
+  try {
+    const userData = app.getPath('userData');
+    return path.join(userData, 'cookies.txt');
+  } catch (_) {
+    const home = os.homedir();
+    return path.join(home, 'AppData', 'Local', 'YASBrowser', 'cookies.txt');
+  }
+}
+
+function hasCustomCookies() {
+  const p = getCustomCookiesPath();
+  try {
+    return fs.existsSync(p) && fs.statSync(p).size > 10;
+  } catch (_) {
+    return false;
+  }
+}
+
+ipcMain.handle('system:get-cookie-status', async () => {
+  const custom = hasCustomCookies();
+  const available = detectAvailableBrowsers();
+  return {
+    success: true,
+    hasCustomCookies: custom,
+    customCookiesPath: custom ? getCustomCookiesPath() : null,
+    preferredCookieBrowser,
+    activeCookieBrowser: lastSuccessfulCookieBrowser,
+    availableBrowsers: available
+  };
+});
+
+ipcMain.handle('system:import-cookie-file', async () => {
+  if (!mainWindow) return { success: false, error: 'Window not available' };
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Netscape Format cookies.txt File',
+    filters: [
+      { name: 'Cookie Files (*.txt, *.cookies)', extensions: ['txt', 'cookies'] },
+      { name: 'All Files', extensions: ['*'] }
+    ],
+    properties: ['openFile']
+  });
+
+  if (!result.canceled && result.filePaths.length > 0) {
+    const src = result.filePaths[0];
+    try {
+      const content = fs.readFileSync(src, 'utf-8');
+      if (!content || content.length < 10) {
+        return { success: false, error: 'The selected file is empty.' };
+      }
+      const dest = getCustomCookiesPath();
+      const destDir = path.dirname(dest);
+      if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+      fs.writeFileSync(dest, content, 'utf-8');
+      logDownloaderEvent('COOKIE_BRIDGE', `✓ Imported custom cookies.txt (${content.length} bytes)`);
+      return { success: true, path: dest, size: content.length };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  }
+  return { success: false, canceled: true };
+});
+
+ipcMain.handle('system:save-cookie-text', async (event, cookieText) => {
+  if (!cookieText || typeof cookieText !== 'string' || cookieText.trim().length < 10) {
+    return { success: false, error: 'Please provide valid Netscape cookies.txt content.' };
+  }
+  try {
+    const dest = getCustomCookiesPath();
+    const destDir = path.dirname(dest);
+    if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+    fs.writeFileSync(dest, cookieText.trim(), 'utf-8');
+    logDownloaderEvent('COOKIE_BRIDGE', `✓ Saved pasted cookies to cookies.txt (${cookieText.length} bytes)`);
+    return { success: true, path: dest, size: cookieText.length };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('system:clear-manual-cookies', async () => {
+  try {
+    const dest = getCustomCookiesPath();
+    if (fs.existsSync(dest)) {
+      fs.unlinkSync(dest);
+      logDownloaderEvent('COOKIE_BRIDGE', 'Cleared imported custom cookies file.');
+    }
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+/**
+ * Safe Live Cookie Bridge & Metadata Extraction Diagnostic
+ */
+ipcMain.handle('system:test-cookie-bridge', async (event, testUrl) => {
+  const targetUrl = testUrl || 'https://www.youtube.com/watch?v=aqz-KE-bpKQ';
+  logDownloaderEvent('COOKIE_BRIDGE', `Running Cookie Bridge & Extractor Live Diagnostic on: ${targetUrl}`);
+
+  const ytdlpDiscovery = await discoverBinary('yt-dlp');
+  if (!ytdlpDiscovery) {
+    return {
+      success: false,
+      error: 'yt-dlp executable was not found on system.'
+    };
+  }
+
+  const cleanUrl = normalizeMediaUrl(targetUrl);
+  const steps = [];
+
+  // Step 1: Mobile Client (android,ios) - Fast Anti-Bot Bypass
+  logDownloaderEvent('COOKIE_BRIDGE', 'Step 1: Testing Modern Mobile Innertube API (android,ios)...');
+  const step1 = await runYtdlpJsonPass(ytdlpDiscovery, cleanUrl, {
+    playerClients: 'android,ios',
+    tag: 'Test-Mobile'
+  });
+
+  steps.push({
+    name: 'Mobile Innertube API (android,ios)',
+    code: step1.code,
+    durationMs: step1.durationMs,
+    sanitizedCmd: step1.sanitizedCmd,
+    passed: step1.code === 0 && Boolean(step1.stdout.trim())
+  });
+
+  if (step1.code === 0 && step1.stdout.trim()) {
+    try {
+      const raw = JSON.parse(step1.stdout);
+      const normalized = processRawYtdlpMetadata(cleanUrl, raw);
+      logDownloaderEvent('COOKIE_BRIDGE', `✓ Step 1 Succeeded! Formats count: ${normalized.formats?.length || 0}`);
+      return {
+        success: true,
+        method: 'Mobile Innertube Client (Anti-Bot Zero-Login)',
+        title: normalized.title,
+        duration: normalized.durationFormatted || normalized.durationString,
+        thumbnail: normalized.thumbnail,
+        formatCount: normalized.formats?.length || 0,
+        sanitizedCmd: step1.sanitizedCmd,
+        steps
+      };
+    } catch (_) {}
+  }
+
+  // Step 2: Custom Netscape cookies.txt
+  if (hasCustomCookies()) {
+    const customCookies = getCustomCookiesPath();
+    logDownloaderEvent('COOKIE_BRIDGE', 'Step 2: Testing Imported Netscape cookies.txt...');
+    const step2 = await runYtdlpJsonPass(ytdlpDiscovery, cleanUrl, {
+      cookieFile: customCookies,
+      playerClients: 'web,android',
+      tag: 'Test-CustomCookies'
+    });
+
+    steps.push({
+      name: 'Imported cookies.txt File',
+      code: step2.code,
+      durationMs: step2.durationMs,
+      sanitizedCmd: step2.sanitizedCmd,
+      passed: step2.code === 0 && Boolean(step2.stdout.trim())
+    });
+
+    if (step2.code === 0 && step2.stdout.trim()) {
+      try {
+        const raw = JSON.parse(step2.stdout);
+        const normalized = processRawYtdlpMetadata(cleanUrl, raw);
+        logDownloaderEvent('COOKIE_BRIDGE', `✓ Step 2 Succeeded via Imported Cookies! Formats count: ${normalized.formats?.length || 0}`);
+        return {
+          success: true,
+          method: 'Imported cookies.txt File',
+          title: normalized.title,
+          duration: normalized.durationFormatted || normalized.durationString,
+          thumbnail: normalized.thumbnail,
+          formatCount: normalized.formats?.length || 0,
+          sanitizedCmd: step2.sanitizedCmd,
+          steps
+        };
+      } catch (_) {}
+    }
+  }
+
+  // Step 3-6: Browser Cookie Fallbacks (Edge -> Chrome -> Brave -> Firefox)
+  const browserCandidates = ['edge', 'chrome', 'brave', 'firefox'];
+  for (const b of browserCandidates) {
+    logDownloaderEvent('COOKIE_BRIDGE', `Testing Browser Cookie Bridge via [${b}]...`);
+    const pass = await runYtdlpJsonPass(ytdlpDiscovery, cleanUrl, {
+      cookieBrowser: b,
+      playerClients: 'web,android',
+      tag: `Test-${b}`
+    });
+
+    steps.push({
+      name: `Browser Cookie Bridge (${b})`,
+      code: pass.code,
+      durationMs: pass.durationMs,
+      sanitizedCmd: pass.sanitizedCmd,
+      passed: pass.code === 0 && Boolean(pass.stdout.trim())
+    });
+
+    if (pass.code === 0 && pass.stdout.trim()) {
+      try {
+        const raw = JSON.parse(pass.stdout);
+        const normalized = processRawYtdlpMetadata(cleanUrl, raw);
+        lastSuccessfulCookieBrowser = b;
+        logDownloaderEvent('COOKIE_BRIDGE', `✓ Succeeded via [${b}] browser cookies! Formats count: ${normalized.formats?.length || 0}`);
+        return {
+          success: true,
+          method: `Browser Cookies (${b})`,
+          title: normalized.title,
+          duration: normalized.durationFormatted || normalized.durationString,
+          thumbnail: normalized.thumbnail,
+          formatCount: normalized.formats?.length || 0,
+          sanitizedCmd: pass.sanitizedCmd,
+          steps
+        };
+      } catch (_) {}
+    }
+  }
+
+  return {
+    success: false,
+    error: 'All extraction methods and browser cookie bridges failed.',
+    steps
+  };
+});
+
+/**
  * Downloader Engine Health Check & Production Self-Test
  * Performs active functional validation of:
  * - yt-dlp executable existence, accessibility, and --version command output
@@ -964,41 +1194,79 @@ function normalizeMediaUrl(rawUrl) {
 /**
  * Spawns a yt-dlp JSON extraction pass with given arguments
  */
-function runYtdlpJsonPass(executablePath, cleanUrl, cookieBrowser = null, extraArgs = []) {
+function runYtdlpJsonPass(executablePath, cleanUrl, options = {}) {
+  // Support legacy parameter signature (executablePath, cleanUrl, cookieBrowser, extraArgs)
+  if (typeof options === 'string' || Array.isArray(arguments[3])) {
+    const legacyCookie = typeof options === 'string' ? options : null;
+    const legacyExtra = Array.isArray(arguments[3]) ? arguments[3] : [];
+    options = {
+      cookieBrowser: legacyCookie,
+      extraArgs: legacyExtra,
+      playerClients: legacyCookie ? 'web,android' : 'android,ios'
+    };
+  }
+
   return new Promise((resolve) => {
+    const {
+      cookieBrowser = null,
+      cookieFile = null,
+      playerClients = 'android,ios',
+      extraArgs = [],
+      tag = 'Pass'
+    } = options;
+
     const args = [
       '--dump-single-json',
       '--no-warnings',
       '--no-check-certificates',
       '--no-playlist',
       '--prefer-free-formats',
-      '--socket-timeout', '25',
+      '--socket-timeout', '30',
       '--retries', '8',
       '--fragment-retries', '8',
-      '--format-sort', 'res,fps,codec:h264:m4a,size',
-      '--extractor-args', 'youtube:player_client=android,ios,web,web_embedded,mweb',
-      '--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      '--add-header', 'Accept-Language:en-US,en;q=0.9',
-      ...extraArgs
+      '--format-sort', 'res,fps,codec:h264:m4a,size'
     ];
+
+    if (playerClients) {
+      args.push('--extractor-args', `youtube:player_client=${playerClients}`);
+    }
+
+    args.push(
+      '--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      '--add-header', 'Accept-Language:en-US,en;q=0.9'
+    );
 
     if (cachedFfmpegPath) {
       args.unshift('--ffmpeg-location', cachedFfmpegPath);
     }
 
-    if (cookieBrowser && cookieBrowser !== 'none') {
+    if (cookieFile && fs.existsSync(cookieFile)) {
+      args.push('--cookies', cookieFile);
+    } else if (cookieBrowser && cookieBrowser !== 'none') {
       args.push('--cookies-from-browser', cookieBrowser);
+    }
+
+    if (extraArgs && extraArgs.length > 0) {
+      args.push(...extraArgs);
     }
 
     args.push(cleanUrl);
 
-    console.log(`[YAS Main] Running yt-dlp analysis (cookies: ${cookieBrowser || 'none'}): ${executablePath} ${args.join(' ')}`);
+    // Build sanitized command string without exposing paths or secrets
+    const sanitizedArgs = args.map(a => {
+      if (cookieFile && a === cookieFile) return '<imported_cookies.txt>';
+      return a;
+    });
+    const sanitizedCmd = `"${path.basename(executablePath)}" ${sanitizedArgs.join(' ')}`;
+
+    console.log(`[YAS Main] Running yt-dlp analysis [${tag}]: ${sanitizedCmd}`);
 
     let ytdlpProcess;
+    const startTime = Date.now();
     try {
       ytdlpProcess = spawn(executablePath, args);
     } catch (err) {
-      return resolve({ code: -1, stdout: '', stderr: err.message, error: err });
+      return resolve({ code: -1, stdout: '', stderr: err.message, error: err, sanitizedCmd, durationMs: Date.now() - startTime });
     }
 
     let stdoutData = '';
@@ -1013,144 +1281,20 @@ function runYtdlpJsonPass(executablePath, cleanUrl, cookieBrowser = null, extraA
     });
 
     ytdlpProcess.on('close', (code) => {
-      resolve({ code, stdout: stdoutData, stderr: stderrData });
+      resolve({ code, stdout: stdoutData, stderr: stderrData, sanitizedCmd, durationMs: Date.now() - startTime });
     });
 
     ytdlpProcess.on('error', (err) => {
-      resolve({ code: -1, stdout: stdoutData, stderr: err.message, error: err });
+      resolve({ code: -1, stdout: stdoutData, stderr: err.message, error: err, sanitizedCmd, durationMs: Date.now() - startTime });
     });
   });
 }
 
 // -------------------------------------------------------------
-// Media Analysis Engine (yt-dlp with Auto-Cookie Anti-Bot Bypass)
+// Media Analysis Engine (Delegated to Autonomous ExtractionManager)
 // -------------------------------------------------------------
 ipcMain.handle('media:analyze', async (event, targetUrl) => {
-  console.log(`[YAS Main] Analyzing media URL: ${targetUrl}`);
-
-  if (!targetUrl || typeof targetUrl !== 'string' || !targetUrl.trim()) {
-    return {
-      success: false,
-      error: 'Please enter a valid YouTube or Instagram media link.',
-      errorType: 'invalid_url'
-    };
-  }
-
-  const cleanUrl = normalizeMediaUrl(targetUrl);
-  const ytdlpInfo = await checkBinaryAvailability('yt-dlp');
-
-  if (!ytdlpInfo.available) {
-    console.warn('[YAS Main] yt-dlp binary not found on local PATH. Using intelligent stream preview engine.');
-    const simulated = generateFallbackAnalysis(cleanUrl || targetUrl);
-    return {
-      success: true,
-      data: simulated,
-      isSimulated: true,
-      notice: 'yt-dlp binary not found on your system PATH. Displaying high-fidelity preview streams. Install yt-dlp to download live streams.'
-    };
-  }
-
-  cachedYtdlpPath = ytdlpInfo.path;
-  if (!cachedFfmpegPath) {
-    const ffmpegInfo = await checkBinaryAvailability('ffmpeg');
-    if (ffmpegInfo.available) cachedFfmpegPath = ffmpegInfo.path;
-  }
-
-  const executablePath = cachedYtdlpPath || 'yt-dlp';
-  const cookieCandidates = getCookieBrowserCandidates();
-  const isYouTube = /youtube\.com|youtu\.be/i.test(cleanUrl);
-  const isInstagram = /instagram\.com/i.test(cleanUrl);
-
-  // Strategy:
-  // 1. If we have a previously successful cookie browser or preferred cookie browser, try with that first.
-  // 2. If no cookie browser was previously active, try initial clean pass.
-  // 3. If initial attempt hits bot verification / login / 429 / age restriction, loop through candidate browsers.
-
-  logDownloaderEvent('ANALYSIS', `Starting analysis for URL (${isYouTube ? 'YouTube' : (isInstagram ? 'Instagram' : 'Web')})`, {
-    target: cleanUrl.substring(0, 80),
-    platform: isYouTube ? 'YouTube' : (isInstagram ? 'Instagram' : 'Web'),
-    ytdlpLocation: executablePath,
-    ffmpegLocation: cachedFfmpegPath || 'Not Found'
-  });
-
-  let initialCookie = lastSuccessfulCookieBrowser || (preferredCookieBrowser !== 'auto' ? preferredCookieBrowser : null);
-  logDownloaderEvent('COOKIE_BRIDGE', `Initial extraction attempt with cookie source: ${initialCookie || 'None (Direct anti-bot profile)'}`);
-
-  let firstPass = await runYtdlpJsonPass(executablePath, cleanUrl, initialCookie);
-
-  if (firstPass.code === 0 && firstPass.stdout.trim()) {
-    try {
-      const rawInfo = JSON.parse(firstPass.stdout);
-      const normalized = processRawYtdlpMetadata(cleanUrl, rawInfo);
-      logDownloaderEvent('ANALYSIS', `✓ Extraction succeeded on initial pass (${normalized.title.substring(0, 50)})`, {
-        cookieSourceUsed: initialCookie || 'None',
-        formatCount: normalized.formats?.length || 0
-      });
-      return { success: true, data: normalized, isSimulated: false, usedCookies: initialCookie };
-    } catch (parseErr) {
-      console.error('[YAS Main] Failed to parse yt-dlp JSON:', parseErr);
-      logDownloaderEvent('ERROR', `Failed to parse yt-dlp JSON output`, { error: parseErr.message });
-    }
-  }
-
-  // Check if stderr indicates bot verification, login required, or age gate
-  const needsCookies = /sign in to confirm|confirm you are not a bot|bot verification|Use --cookies-from-browser|HTTP Error 429|login required|confirm your age|age-restricted|private video/i.test(firstPass.stderr);
-  
-  logDownloaderEvent('ANTI_BOT', `Initial pass returned status ${firstPass.code}. Anti-bot challenge detected: ${needsCookies ? 'Yes' : 'No'}`, {
-    stderrPreview: (firstPass.stderr || '').substring(0, 140).replace(/\r?\n/g, ' ')
-  });
-
-  if (needsCookies || firstPass.code !== 0) {
-    console.log(`[YAS Main] Initial pass encountered anti-bot/access challenge. Retrying with browser cookie extraction...`);
-
-    for (const browserId of cookieCandidates) {
-      if (browserId === initialCookie) continue; // Already tried
-
-      logDownloaderEvent('COOKIE_BRIDGE', `Attempting fallback session cookie extraction via [${browserId}]...`);
-      const retryPass = await runYtdlpJsonPass(executablePath, cleanUrl, browserId);
-
-      if (retryPass.code === 0 && retryPass.stdout.trim()) {
-        try {
-          const rawInfo = JSON.parse(retryPass.stdout);
-          const normalized = processRawYtdlpMetadata(cleanUrl, rawInfo);
-          lastSuccessfulCookieBrowser = browserId;
-          logDownloaderEvent('COOKIE_BRIDGE', `✓ Anti-bot challenge bypassed using [${browserId}] browser session cookies!`, {
-            browser: browserId,
-            mediaTitle: normalized.title.substring(0, 50)
-          });
-          return { success: true, data: normalized, isSimulated: false, usedCookies: browserId };
-        } catch (_) {}
-      } else {
-        logDownloaderEvent('COOKIE_BRIDGE', `Fallback attempt with [${browserId}] exited with code ${retryPass.code}`);
-      }
-    }
-  }
-
-  // If all live extractor passes failed, parse the final stderr to provide a clear explanation
-  const tailoredError = parseYtdlpStderr(firstPass.stderr);
-  logDownloaderEvent('ERROR', `All extraction passes failed. Final error category: [${tailoredError.type}]`, {
-    errorTitle: tailoredError.title,
-    errorMessage: tailoredError.message
-  });
-
-  if (tailoredError.isExplicit) {
-    return {
-      success: false,
-      error: tailoredError.message,
-      errorTitle: tailoredError.title,
-      errorType: tailoredError.type,
-      suggestedAction: tailoredError.suggestedAction
-    };
-  }
-
-  // Safe fallback preview if general extraction issue occurred
-  const fallback = generateFallbackAnalysis(cleanUrl);
-  return {
-    success: true,
-    data: fallback,
-    isSimulated: true,
-    notice: tailoredError.message || `Extractor returned status ${firstPass.code}. Displaying preview format matrix.`
-  };
+  return await extractionManager.analyzeMedia(targetUrl);
 });
 
 /**
@@ -1483,277 +1627,28 @@ function processRawYtdlpMetadata(url, raw) {
 // Real Download Execution & Progress Streaming
 // -------------------------------------------------------------
 ipcMain.handle('media:start-download', async (event, config) => {
-  const { downloadId, url, formatId, isAudioOnly, outputFolder, title, ext } = config;
-  const targetDir = outputFolder || path.join(os.homedir(), 'Downloads');
-
-  if (!fs.existsSync(targetDir)) {
-    try {
-      fs.mkdirSync(targetDir, { recursive: true });
-    } catch (e) {
-      console.error('[YAS Main] Failed to create download folder:', e);
-    }
-  }
-
-  const ytdlpInfo = await checkBinaryAvailability('yt-dlp');
-
-  if (!ytdlpInfo.available) {
-    // Run Simulated Native Download Stream
-    runSimulatedDownload(downloadId, url, title, formatId, ext, targetDir);
-    return {
-      success: true,
-      downloadId,
-      isSimulated: true,
-      saveDirectory: targetDir,
-      message: 'Download job initialized in YAS stream pipeline.'
-    };
-  }
-
-  const executablePath = ytdlpInfo.path || 'yt-dlp';
-  cachedYtdlpPath = ytdlpInfo.path;
-  if (!cachedFfmpegPath) {
-    const ffmpegInfo = await checkBinaryAvailability('ffmpeg');
-    if (ffmpegInfo.available) cachedFfmpegPath = ffmpegInfo.path;
-  }
-  const cleanUrl = normalizeMediaUrl(url);
-
-  // Real yt-dlp command line arguments
-  const outputTemplate = path.join(targetDir, '%(title).160B [%(id)s].%(ext)s');
-  const args = [
-    '--newline',
-    '--no-warnings',
-    '--no-check-certificates',
-    '--no-playlist',
-    '--socket-timeout', '30',
-    '--retries', '10',
-    '--fragment-retries', '10',
-    '--extractor-args', 'youtube:player_client=android,ios,web,web_embedded,mweb',
-    '--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    '--progress-template',
-    'DOWNLOAD_PROGRESS|%(progress.downloaded_bytes)s|%(progress.total_bytes_estimate)s|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress.filename)s',
-    '-o', outputTemplate
-  ];
-
-  if (cachedFfmpegPath) {
-    args.push('--ffmpeg-location', cachedFfmpegPath);
-  }
-
-  // Inject browser cookies if available or previously verified
-  const activeCookie = lastSuccessfulCookieBrowser || (preferredCookieBrowser !== 'auto' && preferredCookieBrowser !== 'none' ? preferredCookieBrowser : (getCookieBrowserCandidates()[0] || null));
-  if (activeCookie && activeCookie !== 'none') {
-    args.push('--cookies-from-browser', activeCookie);
-  }
-
-  if (formatId === 'extract_mp3_320') {
-    args.push('-x', '--audio-format', 'mp3', '--audio-quality', '0', cleanUrl);
-  } else if (formatId === 'extract_m4a_best') {
-    args.push('-x', '--audio-format', 'm4a', cleanUrl);
-  } else if (formatId === 'extract_flac_lossless') {
-    args.push('-x', '--audio-format', 'flac', cleanUrl);
-  } else if (formatId && formatId.includes('+')) {
-    args.push('-f', formatId, '--merge-output-format', 'mp4', cleanUrl);
-  } else if (formatId) {
-    args.push('-f', formatId, cleanUrl);
-  } else {
-    args.push('-f', 'bestvideo+bestaudio/best', '--merge-output-format', 'mp4', cleanUrl);
-  }
-
-  logDownloaderEvent('DOWNLOAD', `Spawning download job [${downloadId}] for format: ${formatId || 'best'}`, {
-    title: (title || 'Media').substring(0, 40),
-    cookieSource: activeCookie || 'None',
-    ffmpegLocation: cachedFfmpegPath || 'Not Found',
-    targetDir
-  });
-
-  console.log(`[YAS Main] Spawning download: ${executablePath} ${args.join(' ')}`);
-
-  let downloadProcess;
-  try {
-    downloadProcess = spawn(executablePath, args);
-  } catch (err) {
-    console.error('[YAS Main] Error spawning yt-dlp:', err);
-    logDownloaderEvent('ERROR', `Failed to spawn yt-dlp download process: ${err.message}`);
-    return { success: false, error: err.message };
-  }
-
-  let finalFilePath = null;
-  let lastPercent = 0;
-  let errorBuffer = '';
-
-  activeDownloads.set(downloadId, {
-    process: downloadProcess,
-    downloadId,
-    url: cleanUrl,
-    status: 'downloading',
-    outputFolder: targetDir
-  });
-
-  downloadProcess.stdout.on('data', (data) => {
-    const rawText = data.toString();
-    const lines = rawText.split('\n');
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      
-      // Parse custom progress line
-      if (trimmed.startsWith('DOWNLOAD_PROGRESS|')) {
-        const parts = trimmed.split('|');
-        if (parts.length >= 7) {
-          const downloadedBytes = parseInt(parts[1], 10) || 0;
-          const totalBytes = parseInt(parts[2], 10) || 0;
-          const percentStr = parts[3].replace('%', '').trim();
-          const speedStr = parts[4].trim();
-          const etaStr = parts[5].trim();
-          const filename = parts[6].trim();
-
-          if (filename && filename !== 'NA') finalFilePath = filename;
-
-          const percent = parseFloat(percentStr) || 0;
-          lastPercent = Math.max(lastPercent, percent);
-
-          mainWindow?.webContents.send('media:progress', {
-            downloadId,
-            percent: Math.min(100, Math.max(0, lastPercent)),
-            speed: speedStr && speedStr !== 'NA' ? speedStr : '14.8 MB/s',
-            eta: etaStr && etaStr !== 'NA' ? etaStr : '00:08s',
-            downloadedBytes,
-            totalBytes,
-            downloadedStr: formatBytes(downloadedBytes) + (totalBytes ? ` / ${formatBytes(totalBytes)}` : ''),
-            status: 'downloading',
-            phase: 'downloading',
-            filePath: finalFilePath
-          });
-        }
-      } else if (trimmed.includes('[Merger] Merging formats into')) {
-        // Intercept ffmpeg merge step
-        const match = trimmed.match(/"([^"]+)"/);
-        if (match && match[1]) finalFilePath = match[1];
-
-        logDownloaderEvent('FFMPEG', `Merging audio and video DASH streams with FFmpeg...`, {
-          destination: finalFilePath ? path.basename(finalFilePath) : 'merged.mp4'
-        });
-
-        mainWindow?.webContents.send('media:progress', {
-          downloadId,
-          percent: 98,
-          speed: 'FFmpeg Muxer',
-          eta: '00:02s',
-          status: 'merging',
-          phase: 'Merging audio & video tracks via FFmpeg...',
-          filePath: finalFilePath
-        });
-      } else if (trimmed.includes('[ExtractAudio] Destination:')) {
-        // Intercept audio extraction step
-        const targetAudio = trimmed.replace('[ExtractAudio] Destination:', '').trim();
-        if (targetAudio) finalFilePath = targetAudio;
-
-        logDownloaderEvent('FFMPEG', `Extracting and re-encoding studio audio with FFmpeg`, {
-          destination: targetAudio ? path.basename(targetAudio) : 'audio'
-        });
-
-        mainWindow?.webContents.send('media:progress', {
-          downloadId,
-          percent: 99,
-          speed: 'Audio Encoder',
-          eta: '00:01s',
-          status: 'converting',
-          phase: 'Encoding studio audio soundtrack...',
-          filePath: finalFilePath
-        });
+  return await extractionManager.startDownload(config, {
+    onProgress: (data) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('media:progress', data);
+      }
+    },
+    onComplete: (data) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('media:progress', data);
+      }
+    },
+    onError: (data) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('media:progress', { ...data, status: 'error' });
       }
     }
   });
-
-  downloadProcess.stderr.on('data', (data) => {
-    errorBuffer += data.toString();
-    console.warn(`[YAS Download stderr] ${data.toString()}`);
-  });
-
-  downloadProcess.on('close', (code) => {
-    activeDownloads.delete(downloadId);
-
-    if (code === 0) {
-      let resolvedPath = finalFilePath;
-      if (!resolvedPath || !fs.existsSync(resolvedPath)) {
-        resolvedPath = path.join(targetDir, `${sanitizeFilename(title)}.${ext || 'mp4'}`);
-      }
-
-      logDownloaderEvent('DOWNLOAD', `✓ Download job [${downloadId}] completed successfully!`, {
-        file: path.basename(resolvedPath || 'media.mp4')
-      });
-
-      mainWindow?.webContents.send('media:progress', {
-        downloadId,
-        percent: 100,
-        speed: 'Finished',
-        eta: '00:00s',
-        status: 'completed',
-        phase: 'Complete',
-        filePath: resolvedPath
-      });
-    } else {
-      const tailored = parseYtdlpStderr(errorBuffer);
-      logDownloaderEvent('ERROR', `Download job [${downloadId}] failed with exit code ${code} (${tailored.title})`, {
-        error: tailored.message
-      });
-
-      mainWindow?.webContents.send('media:progress', {
-        downloadId,
-        percent: 0,
-        speed: '0 MB/s',
-        eta: '--',
-        status: 'error',
-        error: tailored.message || `Download terminated with exit code ${code}`
-      });
-    }
-  });
-
-  downloadProcess.on('error', (err) => {
-    activeDownloads.delete(downloadId);
-    mainWindow?.webContents.send('media:progress', {
-      downloadId,
-      status: 'error',
-      error: err.message
-    });
-  });
-
-  return {
-    success: true,
-    downloadId,
-    saveDirectory: targetDir,
-    message: 'Download job initiated.'
-  };
 });
 
-/**
- * Handles download process tree cancellation cleanly
- */
-function killProcessTree(proc) {
-  if (!proc || !proc.pid) return;
-
-  if (process.platform === 'win32') {
-    exec(`taskkill /pid ${proc.pid} /T /F`, () => {});
-  } else {
-    try {
-      proc.kill('SIGTERM');
-      setTimeout(() => {
-        try { proc.kill('SIGKILL'); } catch (e) {}
-      }, 500);
-    } catch (e) {}
-  }
-}
-
 ipcMain.handle('media:cancel-download', async (event, downloadId) => {
-  const item = activeDownloads.get(downloadId);
-  if (item && item.process) {
-    try {
-      killProcessTree(item.process);
-      activeDownloads.delete(downloadId);
-      return { success: true, message: 'Download cancelled successfully' };
-    } catch (err) {
-      return { success: false, error: err.message };
-    }
-  }
-  return { success: true, message: 'Download cleared' };
+  const cancelled = extractionManager.cancelDownload(downloadId);
+  return { success: cancelled, message: 'Download cancelled' };
 });
 
 /**
