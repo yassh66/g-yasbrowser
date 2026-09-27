@@ -540,7 +540,10 @@ class YASBrowser {
     if (this.dom.btnClearBrowsingData) {
       this.dom.btnClearBrowsingData.addEventListener('click', () => {
         this.bookmarks.clear();
-        this.updateBookmarkButton(false);
+        if (this.dom.bookmarkBtn) {
+          this.dom.bookmarkBtn.classList.remove('active');
+        }
+        localStorage.removeItem('yas_bookmarks');
         this.showToast('Browsing cache and local history cleared successfully');
       });
     }
@@ -1564,6 +1567,7 @@ class YASBrowser {
           this.dom.bookmarkBtn.classList.add('active');
           this.showToast('Page added to bookmarks');
         }
+        localStorage.setItem('yas_bookmarks', JSON.stringify(Array.from(this.bookmarks)));
       });
     }
   }
@@ -1628,6 +1632,12 @@ class YASBrowser {
     if (this.dom.bookmarkBtn) {
       this.dom.bookmarkBtn.classList.toggle('active', this.bookmarks.has(tab.url));
     }
+  }
+
+  updateBookmarkButtonState() {
+    const tab = this.getActiveTab();
+    if (!tab || !this.dom.bookmarkBtn) return;
+    this.dom.bookmarkBtn.classList.toggle('active', this.bookmarks.has(tab.url));
   }
 
   updateNavButtons(tab) {
@@ -1898,6 +1908,11 @@ class YASBrowser {
         e.preventDefault();
         if (window.mediaDownloader && window.mediaDownloader.togglePanel) {
           window.mediaDownloader.togglePanel();
+        }
+      } else if (isCmdOrCtrl && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        if (this.dom.bookmarkBtn) {
+          this.dom.bookmarkBtn.click();
         }
       } else if (isCmdOrCtrl && e.key === ',') {
         e.preventDefault();

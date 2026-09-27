@@ -51,10 +51,28 @@
     "directories": {
       "output": "dist-electron"
     },
+    "extraResources": [
+      {
+        "from": "resources/bin",
+        "to": "bin",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
     "win": {
       "icon": "assets/yas-browser.ico",
       "target": [
         "nsis"
+      ],
+      "extraResources": [
+        {
+          "from": "resources/bin",
+          "to": "bin",
+          "filter": [
+            "**/*"
+          ]
+        }
       ]
     },
     "nsis": {

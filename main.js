@@ -199,15 +199,65 @@ function createMainWindow() {
 // -------------------------------------------------------------
 
 /**
- * Finds binary across standard PATH and common platform-specific directories
+ * Finds binary across packaged application resources, user local app data, system PATH, and platform directories
+ * Priority Order:
+ * 1. process.resourcesPath/bin (bundled self-contained installer binaries) & local dev resources/bin
+ * 2. %LOCALAPPDATA%\YASBrowser\bin
+ * 3. System PATH locations (where/which)
+ * 4. Preserved platform-specific candidate locations
  */
 async function discoverBinary(binaryName) {
   const isWin = process.platform === 'win32';
   const isMac = process.platform === 'darwin';
   const isLinux = process.platform === 'linux';
   const binExe = isWin ? `${binaryName}.exe` : binaryName;
+  const home = os.homedir();
+  const localAppData = process.env.LOCALAPPDATA || (home ? path.join(home, 'AppData', 'Local') : '');
 
-  // 1. Check system PATH first using where / which
+  // -------------------------------------------------------------
+  // Priority 1: Packaged resourcesPath & project resources/bin
+  // -------------------------------------------------------------
+  const priority1Paths = [];
+  if (process.resourcesPath) {
+    priority1Paths.push(path.join(process.resourcesPath, 'bin', binExe));
+    priority1Paths.push(path.join(process.resourcesPath, 'bin', binaryName));
+  }
+  // Include development / local source root paths for seamless dev environment support
+  priority1Paths.push(path.join(__dirname, 'resources', 'bin', binExe));
+  priority1Paths.push(path.join(__dirname, 'resources', 'bin', binaryName));
+  priority1Paths.push(path.join(process.cwd(), 'resources', 'bin', binExe));
+  priority1Paths.push(path.join(process.cwd(), 'resources', 'bin', binaryName));
+
+  for (const candidate of priority1Paths) {
+    try {
+      if (candidate && fs.existsSync(candidate)) {
+        return candidate;
+      }
+    } catch (_) {}
+  }
+
+  // -------------------------------------------------------------
+  // Priority 2: %LOCALAPPDATA%\YASBrowser\bin
+  // -------------------------------------------------------------
+  if (isWin && localAppData) {
+    const priority2Paths = [
+      path.join(localAppData, 'YASBrowser', 'bin', binExe),
+      path.join(localAppData, 'YAS Browser', 'bin', binExe),
+      path.join(localAppData, 'yas-browser', 'bin', binExe)
+    ];
+
+    for (const candidate of priority2Paths) {
+      try {
+        if (candidate && fs.existsSync(candidate)) {
+          return candidate;
+        }
+      } catch (_) {}
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Priority 3: System PATH locations (where on Windows, which on Unix)
+  // -------------------------------------------------------------
   const pathCheck = await new Promise((resolve) => {
     const checkCmd = isWin ? `where ${binaryName}` : `which ${binaryName}`;
     exec(checkCmd, (err, stdout) => {
@@ -223,16 +273,16 @@ async function discoverBinary(binaryName) {
 
   if (pathCheck) return pathCheck;
 
-  // 2. Search common known directory paths if not in default PATH
-  const candidates = [];
-  const home = os.homedir();
+  // -------------------------------------------------------------
+  // Preserved Platform-Specific Candidates & Fallbacks
+  // -------------------------------------------------------------
+  const fallbackCandidates = [];
 
   if (isWin) {
-    const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
     const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
     const userProfile = process.env.USERPROFILE || home;
 
-    candidates.push(
+    fallbackCandidates.push(
       path.join(localAppData, 'Microsoft', 'WinGet', 'Links', binExe),
       path.join(localAppData, 'Programs', binaryName, binExe),
       path.join(appData, binaryName, binExe),
@@ -243,7 +293,7 @@ async function discoverBinary(binaryName) {
       path.join(localAppData, 'yt-dlp', binExe)
     );
   } else if (isMac) {
-    candidates.push(
+    fallbackCandidates.push(
       `/opt/homebrew/bin/${binExe}`,
       `/usr/local/bin/${binExe}`,
       `/opt/local/bin/${binExe}`,
@@ -252,7 +302,7 @@ async function discoverBinary(binaryName) {
       path.join(home, 'Applications', binExe)
     );
   } else if (isLinux) {
-    candidates.push(
+    fallbackCandidates.push(
       path.join(home, '.local', 'bin', binExe),
       `/usr/local/bin/${binExe}`,
       `/usr/bin/${binExe}`,
@@ -262,12 +312,12 @@ async function discoverBinary(binaryName) {
     );
   }
 
-  for (const candidate of candidates) {
+  for (const candidate of fallbackCandidates) {
     try {
-      if (fs.existsSync(candidate)) {
+      if (candidate && fs.existsSync(candidate)) {
         return candidate;
       }
-    } catch (e) {}
+    } catch (_) {}
   }
 
   return null;
@@ -352,6 +402,10 @@ ipcMain.handle('system:check-dependencies', async () => {
       success: true,
       ytdlp: ytdlpInfo,
       ffmpeg: ffmpegInfo,
+      ytdlpFound: !!ytdlpInfo.available,
+      ytdlpPath: ytdlpInfo.path,
+      ffmpegFound: !!ffmpegInfo.available,
+      ffmpegPath: ffmpegInfo.path,
       installCommands,
       defaultDownloadPath: path.join(os.homedir(), 'Downloads'),
       platform: process.platform,
@@ -466,6 +520,10 @@ ipcMain.handle('media:analyze', async (event, targetUrl) => {
   }
 
   cachedYtdlpPath = ytdlpInfo.path;
+  if (!cachedFfmpegPath) {
+    const ffmpegInfo = await checkBinaryAvailability('ffmpeg');
+    if (ffmpegInfo.available) cachedFfmpegPath = ffmpegInfo.path;
+  }
 
   return new Promise((resolve) => {
     const args = [
@@ -885,6 +943,11 @@ ipcMain.handle('media:start-download', async (event, config) => {
   }
 
   const executablePath = ytdlpInfo.path || 'yt-dlp';
+  cachedYtdlpPath = ytdlpInfo.path;
+  if (!cachedFfmpegPath) {
+    const ffmpegInfo = await checkBinaryAvailability('ffmpeg');
+    if (ffmpegInfo.available) cachedFfmpegPath = ffmpegInfo.path;
+  }
   const cleanUrl = normalizeMediaUrl(url);
 
   // Real yt-dlp command line arguments
