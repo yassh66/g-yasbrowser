@@ -51,6 +51,18 @@
     "directories": {
       "output": "dist-electron"
     },
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "styles/**/*",
+      "renderer/**/*",
+      "assets/**/*",
+      "public/**/*",
+      "package.json",
+      "!resources/**/*",
+      "!dist-electron/**/*"
+    ],
     "extraResources": [
       {
         "from": "resources/bin",
@@ -64,15 +76,6 @@
       "icon": "assets/yas-browser.ico",
       "target": [
         "nsis"
-      ],
-      "extraResources": [
-        {
-          "from": "resources/bin",
-          "to": "bin",
-          "filter": [
-            "**/*"
-          ]
-        }
       ]
     },
     "nsis": {
