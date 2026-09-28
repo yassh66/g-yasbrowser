@@ -812,23 +812,23 @@ class MediaDownloader {
       const pill = document.getElementById(`pill_${downloadId}`);
       if (pill) {
         pill.className = 'queue-item-status-pill error';
-        pill.textContent = 'Error';
+        pill.textContent = 'Failed';
       }
-      this.showToast(`Download error: ${data.error || 'Network error'}`);
+      this.showToast(`Download could not be completed. Please try another format.`);
       this.updateDownloadCounter();
       return;
     }
 
-    if (data.status === 'merging') {
-      job.status = 'merging';
-    } else if (job.status !== 'merging' && job.status !== 'completed') {
+    if (data.status === 'merging' || data.status === 'converting') {
+      job.status = 'processing';
+    } else if (job.status !== 'processing' && job.status !== 'completed') {
       job.status = 'downloading';
     }
 
     job.progress = typeof data.percent === 'number' ? data.percent : (job.progress || 0);
-    job.speed = data.speed || job.speed || '2.4 MB/s';
-    job.eta = data.eta || job.eta || '15s';
-    job.downloaded = data.downloaded || job.downloaded || '12 MB';
+    job.speed = data.speed || job.speed || 'Downloading...';
+    job.eta = data.eta || job.eta || '--';
+    job.downloaded = data.downloaded || job.downloaded || '...';
     if (data.filePath) job.outputPath = data.filePath;
 
     const pbar = document.getElementById(`pbar_${downloadId}`);
@@ -839,12 +839,12 @@ class MediaDownloader {
 
     if (pbar) pbar.style.width = `${Math.min(100, Math.max(0, job.progress))}%`;
     if (pill) {
-      if (job.status === 'merging') {
+      if (job.status === 'processing') {
         pill.className = 'queue-item-status-pill merging';
-        pill.textContent = 'Muxing FFmpeg';
+        pill.textContent = 'Processing...';
       } else if (job.status !== 'completed') {
         pill.className = 'queue-item-status-pill downloading';
-        pill.textContent = `${Math.round(job.progress)}%`;
+        pill.textContent = `Downloading ${Math.round(job.progress)}%`;
       }
     }
     if (speed) speed.textContent = job.speed;
@@ -875,7 +875,7 @@ class MediaDownloader {
 
     if (pill) {
       pill.className = 'queue-item-status-pill completed';
-      pill.textContent = '✓ 100% Completed';
+      pill.textContent = 'Completed';
     }
 
     if (actions) {

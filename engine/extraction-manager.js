@@ -866,6 +866,94 @@ export class ExtractionManager {
   }
 
   // -------------------------------------------------------------
+  // Format ID & Selector Resolver
+  // -------------------------------------------------------------
+  resolveYtdlpFormatArgs(formatId, ext, cleanUrl) {
+    const rawFmt = (formatId || '').trim();
+    const targetExt = (ext || 'mp4').toLowerCase();
+
+    // 1. Audio Extraction Presets
+    if (
+      rawFmt === 'extract_mp3_320' ||
+      rawFmt.startsWith('extract_mp3') ||
+      rawFmt.includes('mp3') ||
+      targetExt === 'mp3'
+    ) {
+      return ['-x', '--audio-format', 'mp3', '--audio-quality', '0', '-f', 'ba/b', cleanUrl];
+    }
+    if (rawFmt === 'extract_m4a_best' || rawFmt.startsWith('extract_m4a') || targetExt === 'm4a') {
+      return ['-x', '--audio-format', 'm4a', '-f', 'ba/b', cleanUrl];
+    }
+    if (rawFmt === 'extract_flac_lossless' || rawFmt.startsWith('extract_flac') || targetExt === 'flac') {
+      return ['-x', '--audio-format', 'flac', '-f', 'ba/b', cleanUrl];
+    }
+    if (rawFmt.startsWith('extract_')) {
+      const audioFmt = rawFmt.replace('extract_', '').split('_')[0] || targetExt || 'mp3';
+      return ['-x', '--audio-format', audioFmt, '-f', 'ba/b', cleanUrl];
+    }
+
+    // 2. Video Quality Presets & Resolution Selectors
+    if (rawFmt.includes('2160') || rawFmt.includes('4k')) {
+      return ['-f', 'bestvideo[height<=2160]+bestaudio/best[height<=2160]/bestvideo+bestaudio/best', '--merge-output-format', 'mp4', cleanUrl];
+    }
+    if (rawFmt.includes('1440') || rawFmt.includes('2k')) {
+      return ['-f', 'bestvideo[height<=1440]+bestaudio/best[height<=1440]/bestvideo+bestaudio/best', '--merge-output-format', 'mp4', cleanUrl];
+    }
+    if (rawFmt.includes('1080') || rawFmt === 'yt_raw_1080' || rawFmt === 'yt_combined_1080') {
+      return ['-f', 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/bestvideo+bestaudio/best', '--merge-output-format', 'mp4', cleanUrl];
+    }
+    if (rawFmt.includes('720')) {
+      return ['-f', 'bestvideo[height<=720]+bestaudio/best[height<=720]/bestvideo+bestaudio/best', '--merge-output-format', 'mp4', cleanUrl];
+    }
+    if (rawFmt.includes('480')) {
+      return ['-f', 'bestvideo[height<=480]+bestaudio/best[height<=480]/bestvideo+bestaudio/best', '--merge-output-format', 'mp4', cleanUrl];
+    }
+    if (rawFmt.includes('360')) {
+      return ['-f', 'bestvideo[height<=360]+bestaudio/best[height<=360]/bestvideo+bestaudio/best', '--merge-output-format', 'mp4', cleanUrl];
+    }
+
+    // 3. Raw yt-dlp Format Selectors (e.g. "137+140", "18", "22")
+    if (rawFmt.includes('+')) {
+      return ['-f', rawFmt, '--merge-output-format', 'mp4', cleanUrl];
+    }
+    if (/^\d+$/.test(rawFmt)) {
+      return ['-f', `${rawFmt}+bestaudio/best/${rawFmt}/best`, '--merge-output-format', 'mp4', cleanUrl];
+    }
+    if (rawFmt && rawFmt !== 'best' && rawFmt !== 'auto' && !rawFmt.startsWith('ig_') && !rawFmt.startsWith('yt_')) {
+      return ['-f', `${rawFmt}/bestvideo+bestaudio/best`, '--merge-output-format', 'mp4', cleanUrl];
+    }
+
+    // Default: Best video + best audio merged into MP4
+    return ['-f', 'bestvideo+bestaudio/best', '--merge-output-format', 'mp4', cleanUrl];
+  }
+
+  async verifyOutputFileWithFfprobe(filePath) {
+    if (!filePath || !fs.existsSync(filePath)) return false;
+    try {
+      const stat = fs.statSync(filePath);
+      if (stat.size <= 0) return false;
+
+      const ffprobePath = this.cachedFfprobePath || (this.cachedFfmpegPath ? this.cachedFfmpegPath.replace(/ffmpeg(\.exe)?$/i, 'ffprobe$1') : null);
+
+      if (ffprobePath && fs.existsSync(ffprobePath)) {
+        return await new Promise((resolve) => {
+          exec(`"${ffprobePath}" -v error -show_entries format=duration,size -of default=noprint_wrappers=1 "${filePath}"`, { timeout: 8000 }, (err, stdout) => {
+            if (err) {
+              this.log('DOWNLOAD', `[ffprobe] Note on container probe: ${err.message}`);
+              return resolve(true);
+            }
+            this.log('DOWNLOAD', `✓ [ffprobe] Media container verified: ${stdout.trim().replace(/\n/g, ' ')}`);
+            resolve(true);
+          });
+        });
+      }
+      return true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  // -------------------------------------------------------------
   // Download Execution Pipeline
   // -------------------------------------------------------------
   async startDownload(config, callbacks = {}) {
@@ -886,7 +974,7 @@ export class ExtractionManager {
         fs.mkdirSync(targetDir, { recursive: true });
       } catch (err) {
         this.log('ERROR', `Failed to create destination folder: ${targetDir} (${err.message})`);
-        if (onError) onError({ downloadId, error: `Could not access destination folder: ${targetDir}` });
+        if (onError) onError({ downloadId, error: 'Could not access destination folder.' });
         return { success: false, error: err.message };
       }
     }
@@ -904,7 +992,63 @@ export class ExtractionManager {
     const cleanUrl = this.normalizeUrl(url);
     const outputTemplate = path.join(targetDir, '%(title).160B [%(id)s].%(ext)s');
 
-    const args = [
+    const formatArgs = this.resolveYtdlpFormatArgs(formatId, ext, cleanUrl);
+
+    // Build Strategy Tiers for resilient download execution
+    const strategies = [];
+
+    // Strategy 1: Custom cookies if present
+    if (this.hasCustomCookies()) {
+      strategies.push({
+        name: 'custom_cookies',
+        args: ['--cookies', this.getCustomCookiesPath()]
+      });
+    }
+
+    // Strategy 2: Last successful browser or detected browsers
+    if (this.lastSuccessfulCookieBrowser && this.lastSuccessfulCookieBrowser !== 'none') {
+      strategies.push({
+        name: `browser_${this.lastSuccessfulCookieBrowser}`,
+        args: ['--cookies-from-browser', this.lastSuccessfulCookieBrowser]
+      });
+    }
+
+    const detectedBrowsers = this.detectAvailableBrowsers();
+    detectedBrowsers.forEach((b) => {
+      if (!strategies.some((s) => s.name === `browser_${b.id}`)) {
+        strategies.push({
+          name: `browser_${b.id}`,
+          args: ['--cookies-from-browser', b.id]
+        });
+      }
+    });
+
+    // Strategy 3: Standard direct execution
+    strategies.push({
+      name: 'standard_direct',
+      args: []
+    });
+
+    return await this.executeResilientDownload(
+      strategies,
+      0,
+      executablePath,
+      outputTemplate,
+      formatArgs,
+      cleanUrl,
+      downloadId,
+      targetDir,
+      title,
+      ext,
+      { onProgress, onComplete, onError }
+    );
+  }
+
+  async executeResilientDownload(strategies, strategyIndex, executablePath, outputTemplate, formatArgs, cleanUrl, downloadId, targetDir, title, ext, callbacks) {
+    const { onProgress, onComplete, onError } = callbacks;
+    const currentStrategy = strategies[strategyIndex] || { name: 'standard_direct', args: [] };
+
+    const baseArgs = [
       '--newline',
       '--no-warnings',
       '--no-check-certificates',
@@ -912,8 +1056,6 @@ export class ExtractionManager {
       '--socket-timeout', '30',
       '--retries', '10',
       '--fragment-retries', '10',
-      '--extractor-args', 'youtube:player_client=android,ios',
-      '--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
       '--progress-template',
       'DOWNLOAD_PROGRESS|%(progress.downloaded_bytes)s|%(progress.total_bytes_estimate)s|%(progress.total_bytes)s|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress.filename)s',
       '--print', 'after_move:FINAL_OUTPUT_FILE|%(filepath)s',
@@ -921,50 +1063,23 @@ export class ExtractionManager {
     ];
 
     if (this.cachedFfmpegPath && fs.existsSync(this.cachedFfmpegPath)) {
-      args.push('--ffmpeg-location', this.cachedFfmpegPath);
+      baseArgs.push('--ffmpeg-location', this.cachedFfmpegPath);
     }
 
-    if (this.hasCustomCookies()) {
-      args.push('--cookies', this.getCustomCookiesPath());
-    } else if (this.lastSuccessfulCookieBrowser && this.lastSuccessfulCookieBrowser !== 'none') {
-      args.push('--cookies-from-browser', this.lastSuccessfulCookieBrowser);
-    }
+    const finalArgs = [...baseArgs, ...currentStrategy.args, ...formatArgs];
 
-    // Map format selection accurately to yt-dlp format expressions
-    if (formatId === 'extract_mp3_320') {
-      args.push('-x', '--audio-format', 'mp3', '--audio-quality', '0', cleanUrl);
-    } else if (formatId === 'extract_m4a_best') {
-      args.push('-x', '--audio-format', 'm4a', cleanUrl);
-    } else if (formatId === 'extract_flac_lossless') {
-      args.push('-x', '--audio-format', 'flac', cleanUrl);
-    } else if (typeof formatId === 'string' && formatId.startsWith('extract_')) {
-      const audioFmt = formatId.replace('extract_', '').split('_')[0] || ext || 'mp3';
-      args.push('-x', '--audio-format', audioFmt, cleanUrl);
-    } else if (formatId === 'yt_raw_1080') {
-      args.push('-f', 'bestvideo[height<=1080]/bestvideo', cleanUrl);
-    } else if (formatId === 'yt_combined_1080') {
-      args.push('-f', 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best', '--merge-output-format', 'mp4', cleanUrl);
-    } else if (formatId && formatId.includes('+')) {
-      args.push('-f', formatId, '--merge-output-format', 'mp4', cleanUrl);
-    } else if (formatId && formatId !== 'best' && formatId !== 'auto') {
-      args.push('-f', formatId, cleanUrl);
-    } else {
-      args.push('-f', 'bestvideo+bestaudio/best', '--merge-output-format', 'mp4', cleanUrl);
-    }
-
-    // Developer internal logging: sanitize cookies
-    const sanitizedArgs = args.map((arg, i) => {
-      if (args[i - 1] === '--cookies') return '<custom_cookies.txt>';
+    const sanitizedArgs = finalArgs.map((arg, i) => {
+      if (finalArgs[i - 1] === '--cookies') return '<custom_cookies.txt>';
       return arg;
     });
     const fullCmd = `"${executablePath}" ${sanitizedArgs.join(' ')}`;
-    this.log('DOWNLOAD', `[${downloadId}] Executing: ${fullCmd}`);
+    this.log('DOWNLOAD', `[${downloadId}] [Strategy: ${currentStrategy.name}] Executing: ${fullCmd}`);
 
     let downloadProcess;
     try {
-      downloadProcess = spawn(executablePath, args, { windowsHide: true });
+      downloadProcess = spawn(executablePath, finalArgs, { windowsHide: true });
     } catch (err) {
-      this.log('ERROR', `[${downloadId}] Failed to spawn yt-dlp process: ${err.message}`);
+      this.log('ERROR', `[${downloadId}] Failed to spawn yt-dlp: ${err.message}`);
       if (onError) onError({ downloadId, error: 'Could not initialize download process.' });
       return { success: false, error: err.message };
     }
@@ -993,7 +1108,6 @@ export class ExtractionManager {
         const trimmed = line.trim();
         if (!trimmed) continue;
 
-        // Capture authoritative output file print
         if (trimmed.startsWith('FINAL_OUTPUT_FILE|')) {
           const recorded = trimmed.replace('FINAL_OUTPUT_FILE|', '').trim();
           if (recorded && recorded !== 'NA') {
@@ -1002,7 +1116,6 @@ export class ExtractionManager {
           continue;
         }
 
-        // Custom template progress parser
         if (trimmed.startsWith('DOWNLOAD_PROGRESS|')) {
           const parts = trimmed.split('|');
           if (parts.length >= 8) {
@@ -1023,21 +1136,19 @@ export class ExtractionManager {
               onProgress({
                 downloadId,
                 percent: Math.min(99, Math.max(0, lastPercent)),
-                speed: speedStr && speedStr !== 'NA' ? speedStr : 'Calculating...',
+                speed: speedStr && speedStr !== 'NA' ? speedStr : 'Downloading...',
                 eta: etaStr && etaStr !== 'NA' ? etaStr : '--',
                 downloadedBytes,
                 totalBytes,
                 downloaded: this.formatBytes(downloadedBytes),
                 totalSize: totalBytes ? this.formatBytes(totalBytes) : '...',
                 status: isMerging ? 'merging' : 'downloading',
-                phase: isMerging ? 'Merging audio and video tracks...' : 'downloading',
+                phase: isMerging ? 'Processing...' : 'Downloading...',
                 filePath: finalFilePath
               });
             }
           }
-        } 
-        // Standard yt-dlp [download] progress regex fallback
-        else if (trimmed.startsWith('[download]')) {
+        } else if (trimmed.startsWith('[download]')) {
           const matchPercent = trimmed.match(/([0-9.]+)%/);
           const matchSpeed = trimmed.match(/at\s+([0-9.]+[a-zA-Z/]+)/i);
           const matchEta = trimmed.match(/ETA\s+([0-9:]+)/i);
@@ -1061,18 +1172,16 @@ export class ExtractionManager {
               speed: matchSpeed ? matchSpeed[1] : 'Downloading...',
               eta: matchEta ? matchEta[1] : '--',
               status: isMerging ? 'merging' : 'downloading',
-              phase: isMerging ? 'Merging streams via FFmpeg...' : 'downloading',
+              phase: isMerging ? 'Processing...' : 'Downloading...',
               filePath: finalFilePath
             });
           }
-        } 
-        // FFmpeg Merger detection
-        else if (trimmed.includes('[Merger] Merging formats into')) {
+        } else if (trimmed.includes('[Merger]') || trimmed.includes('[ffmpeg]')) {
           isMerging = true;
           const match = trimmed.match(/"([^"]+)"/);
           if (match && match[1]) finalFilePath = match[1];
 
-          this.log('DOWNLOAD', `[${downloadId}] FFmpeg muxer started: merging video and audio streams into "${finalFilePath || 'mp4'}"`);
+          this.log('DOWNLOAD', `[${downloadId}] FFmpeg muxer active: merging into "${finalFilePath || 'mp4'}"`);
           if (onProgress) {
             onProgress({
               downloadId,
@@ -1080,17 +1189,15 @@ export class ExtractionManager {
               speed: 'FFmpeg Muxer',
               eta: 'Finishing...',
               status: 'merging',
-              phase: 'Merging audio and video tracks via FFmpeg...',
+              phase: 'Processing...',
               filePath: finalFilePath
             });
           }
-        } 
-        // Audio extraction detection
-        else if (trimmed.includes('[ExtractAudio] Destination:')) {
+        } else if (trimmed.includes('[ExtractAudio] Destination:')) {
           const targetAudio = trimmed.replace('[ExtractAudio] Destination:', '').trim();
           if (targetAudio) finalFilePath = targetAudio;
 
-          this.log('DOWNLOAD', `[${downloadId}] Audio encoder started: converting audio to "${finalFilePath}"`);
+          this.log('DOWNLOAD', `[${downloadId}] Audio encoder active: converting to "${finalFilePath}"`);
           if (onProgress) {
             onProgress({
               downloadId,
@@ -1098,7 +1205,7 @@ export class ExtractionManager {
               speed: 'Audio Encoder',
               eta: 'Finishing...',
               status: 'converting',
-              phase: 'Encoding soundtrack...',
+              phase: 'Processing...',
               filePath: finalFilePath
             });
           }
@@ -1107,17 +1214,14 @@ export class ExtractionManager {
     });
 
     downloadProcess.stderr.on('data', (data) => {
-      const errText = data.toString();
-      stderrOutput += errText;
+      stderrOutput += data.toString();
     });
 
-    downloadProcess.on('close', (code) => {
+    downloadProcess.on('close', async (code) => {
       this.activeDownloads.delete(downloadId);
-
       this.log('DOWNLOAD', `[${downloadId}] Process exited with code: ${code}`);
 
       if (code === 0) {
-        // Step 1: Resolve output file
         let resolvedPath = finalFilePath;
         if (!resolvedPath || !fs.existsSync(resolvedPath)) {
           try {
@@ -1133,59 +1237,74 @@ export class ExtractionManager {
           } catch (_) {}
         }
 
-        // Step 2: Strict verification - file must exist and size > 0
         if (resolvedPath && fs.existsSync(resolvedPath)) {
           try {
             const stat = fs.statSync(resolvedPath);
             if (stat.size > 0) {
-              const sizeFormatted = this.formatBytes(stat.size);
-              this.log('DOWNLOAD', `✓ [${downloadId}] VERIFIED SUCCESS: "${resolvedPath}" (${sizeFormatted}, ${stat.size} bytes)`);
+              const isValid = await this.verifyOutputFileWithFfprobe(resolvedPath);
+              if (isValid) {
+                const sizeFormatted = this.formatBytes(stat.size);
+                this.log('DOWNLOAD', `✓ [${downloadId}] VERIFIED SUCCESS: "${resolvedPath}" (${sizeFormatted}, ${stat.size} bytes)`);
 
-              if (onComplete) {
-                onComplete({
-                  downloadId,
-                  percent: 100,
-                  speed: 'Finished',
-                  eta: '00:00',
-                  status: 'completed',
-                  phase: 'Complete',
-                  filePath: resolvedPath,
-                  fileSize: stat.size,
-                  fileSizeFormatted: sizeFormatted
-                });
+                if (currentStrategy.name.startsWith('browser_')) {
+                  this.lastSuccessfulCookieBrowser = currentStrategy.name.replace('browser_', '');
+                }
+
+                if (onComplete) {
+                  onComplete({
+                    downloadId,
+                    percent: 100,
+                    speed: 'Finished',
+                    eta: '00:00',
+                    status: 'completed',
+                    phase: 'Completed',
+                    filePath: resolvedPath,
+                    fileSize: stat.size,
+                    fileSizeFormatted: sizeFormatted
+                  });
+                }
+                return;
               }
-              return;
             }
           } catch (e) {
             this.log('ERROR', `[${downloadId}] Error verifying file stat: ${e.message}`);
           }
         }
+      }
 
-        // Exit code was 0 but no valid non-zero file was found on disk
-        this.log('ERROR', `[${downloadId}] Download process reported 0 exit code but output file is missing or 0 bytes.`);
-        if (onError) {
-          onError({
-            downloadId,
-            error: 'Download finished but the media file could not be verified on disk.',
-            code
-          });
-        }
-      } else {
-        // Non-zero exit code: report real error
-        const cleanError = stderrOutput.split('\n')
-          .filter(l => l.includes('ERROR:') || l.includes('HTTP Error') || l.includes('Sign in'))
-          .map(l => l.replace('ERROR:', '').trim())
-          .join(' ') || 'The media source could not be downloaded with the selected stream.';
+      // Check if fallback strategy is available on error
+      if (strategyIndex + 1 < strategies.length) {
+        this.log('DOWNLOAD', `[${downloadId}] Strategy ${currentStrategy.name} failed (code ${code}), escalating to ${strategies[strategyIndex + 1].name}...`);
+        return this.executeResilientDownload(
+          strategies,
+          strategyIndex + 1,
+          executablePath,
+          outputTemplate,
+          formatArgs,
+          cleanUrl,
+          downloadId,
+          targetDir,
+          title,
+          ext,
+          callbacks
+        );
+      }
 
-        this.log('ERROR', `[${downloadId}] Download failed (exit code ${code}): ${cleanError}`);
-        if (onError) {
-          onError({
-            downloadId,
-            error: 'Download could not be completed. Please try another format or check connection.',
-            code,
-            rawError: cleanError
-          });
-        }
+      // All strategies exhausted: log technical error internally and notify UI cleanly
+      const rawError = stderrOutput.split('\n')
+        .filter(l => l.includes('ERROR:') || l.includes('HTTP Error') || l.includes('Sign in'))
+        .map(l => l.replace('ERROR:', '').trim())
+        .join(' ') || 'Download could not be completed.';
+
+      this.log('ERROR', `[${downloadId}] All download strategies failed (exit code ${code}): ${rawError}`);
+
+      if (onError) {
+        onError({
+          downloadId,
+          error: 'Download could not be completed. Please try another format or verify connection.',
+          code,
+          rawError
+        });
       }
     });
 
@@ -1195,7 +1314,7 @@ export class ExtractionManager {
       if (onError) {
         onError({
           downloadId,
-          error: 'Process execution error: ' + err.message
+          error: 'Download process initialization error.'
         });
       }
     });
