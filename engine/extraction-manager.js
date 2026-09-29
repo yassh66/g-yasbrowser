@@ -34,6 +34,22 @@ export class ExtractionManager {
     this.activeDownloads = new Map();
     this.diagnosticLogs = [];
     this.maxLogs = 150;
+    this.electronCookieProvider = null;
+  }
+
+  setElectronCookieProvider(fn) {
+    this.electronCookieProvider = fn;
+  }
+
+  async getElectronCookiesPath(targetDomain) {
+    if (typeof this.electronCookieProvider === 'function') {
+      try {
+        return await this.electronCookieProvider(targetDomain);
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
   }
 
   // -------------------------------------------------------------
@@ -1016,10 +1032,22 @@ export class ExtractionManager {
 
     const formatArgs = this.resolveYtdlpFormatArgs(formatId, ext, cleanUrl);
 
-    // Build Strategy Tiers for resilient download execution
+    const isYouTube = /youtube\.com|youtu\.be/i.test(cleanUrl);
+    const isInstagram = /instagram\.com/i.test(cleanUrl);
+
+    // Build Comprehensive Recovery Strategy Matrix
     const strategies = [];
 
-    // Strategy 1: Custom cookies if present
+    // Strategy 1: Active in-app Electron session cookies (if user is logged in via browser)
+    const electronCookies = await this.getElectronCookiesPath(isInstagram ? '.instagram.com' : '.youtube.com');
+    if (electronCookies && fs.existsSync(electronCookies)) {
+      strategies.push({
+        name: 'electron_session_cookies',
+        args: ['--cookies', electronCookies]
+      });
+    }
+
+    // Strategy 2: Custom imported cookies.txt if present
     if (this.hasCustomCookies()) {
       strategies.push({
         name: 'custom_cookies',
@@ -1027,7 +1055,25 @@ export class ExtractionManager {
       });
     }
 
-    // Strategy 2: Last successful browser or detected browsers
+    // Strategy 3: Mobile Innertube API (High bypass rate against bot blocks)
+    if (isYouTube) {
+      strategies.push({
+        name: 'mobile_innertube_client',
+        args: ['--extractor-args', 'youtube:player_client=android,ios']
+      });
+
+      strategies.push({
+        name: 'web_creator_tv_client',
+        args: ['--extractor-args', 'youtube:player_client=web_creator,tv']
+      });
+
+      strategies.push({
+        name: 'mweb_tv_client',
+        args: ['--extractor-args', 'youtube:player_client=mweb,tv_embedded']
+      });
+    }
+
+    // Strategy 4: Last successful browser or detected installed browsers
     if (this.lastSuccessfulCookieBrowser && this.lastSuccessfulCookieBrowser !== 'none') {
       strategies.push({
         name: `browser_${this.lastSuccessfulCookieBrowser}`,
@@ -1045,7 +1091,7 @@ export class ExtractionManager {
       }
     });
 
-    // Strategy 3: Standard direct execution
+    // Strategy 5: Standard direct execution
     strategies.push({
       name: 'standard_direct',
       args: []

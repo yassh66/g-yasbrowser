@@ -32,6 +32,37 @@ let mainWindow = null;
 const activeDownloads = new Map();
 const extractionManager = new ExtractionManager(app);
 
+// Export active in-app Electron session cookies into Netscape format for yt-dlp
+async function exportElectronCookiesToNetscape(targetDomain) {
+  try {
+    if (!session || !session.defaultSession) return null;
+    const cookies = await session.defaultSession.cookies.get({ domain: targetDomain || '.youtube.com' });
+    if (!cookies || cookies.length === 0) return null;
+
+    let netscape = '# Netscape HTTP Cookie File\n# http://curl.haxx.se/rfc/cookie_spec.html\n# Exported from YAS Browser Chromium Session\n\n';
+    for (const c of cookies) {
+      const domain = c.domain || (targetDomain || '.youtube.com');
+      const flag = domain.startsWith('.') ? 'TRUE' : 'FALSE';
+      const cookiePath = c.path || '/';
+      const secure = c.secure ? 'TRUE' : 'FALSE';
+      const expiration = c.expirationDate ? Math.floor(c.expirationDate) : Math.floor(Date.now() / 1000) + 86400 * 30;
+      const name = c.name;
+      const value = c.value;
+      netscape += `${domain}\t${flag}\t${cookiePath}\t${secure}\t${expiration}\t${name}\t${value}\n`;
+    }
+
+    const userDataDir = app.getPath('userData');
+    const destPath = path.join(userDataDir, 'electron_session_cookies.txt');
+    fs.writeFileSync(destPath, netscape, 'utf-8');
+    return destPath;
+  } catch (err) {
+    console.error('[YAS Cookie Export]', err);
+    return null;
+  }
+}
+
+extractionManager.setElectronCookieProvider(exportElectronCookiesToNetscape);
+
 // Shields & Ad-blocking status
 let shieldsEnabled = true;
 let shieldsBlockedStats = {
