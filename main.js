@@ -1651,6 +1651,10 @@ ipcMain.handle('media:cancel-download', async (event, downloadId) => {
   return { success: cancelled, message: 'Download cancelled' };
 });
 
+ipcMain.handle('media:run-diagnostic-test', async () => {
+  return await extractionManager.runRealDownloadDiagnostic();
+});
+
 /**
  * Native Folder & File Reveal
  */

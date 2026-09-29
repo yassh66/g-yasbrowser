@@ -73,6 +73,16 @@ export class ExtractionManager {
     if (process.resourcesPath) {
       priority1.push(path.join(process.resourcesPath, 'bin', binExe));
       priority1.push(path.join(process.resourcesPath, 'bin', binaryName));
+      priority1.push(path.join(process.resourcesPath, 'app.asar.unpacked', 'resources', 'bin', binExe));
+      priority1.push(path.join(process.resourcesPath, 'resources', 'bin', binExe));
+    }
+    if (this.app && typeof this.app.getAppPath === 'function') {
+      try {
+        const appPath = this.app.getAppPath();
+        priority1.push(path.join(appPath, 'resources', 'bin', binExe));
+        priority1.push(path.join(appPath, '..', 'resources', 'bin', binExe));
+        priority1.push(path.join(appPath, '..', 'bin', binExe));
+      } catch (_) {}
     }
     if (__dirname) {
       priority1.push(path.join(__dirname, '..', 'resources', 'bin', binExe));
@@ -84,6 +94,9 @@ export class ExtractionManager {
     for (const candidate of priority1) {
       try {
         if (candidate && fs.existsSync(candidate)) {
+          if (!isWin) {
+            try { fs.chmodSync(candidate, 0o755); } catch (_) {}
+          }
           return candidate;
         }
       } catch (_) {}
@@ -94,7 +107,8 @@ export class ExtractionManager {
       const priority2 = [
         path.join(localAppData, 'YASBrowser', 'bin', binExe),
         path.join(localAppData, 'YAS Browser', 'bin', binExe),
-        path.join(localAppData, 'Programs', 'YAS Browser', 'resources', 'bin', binExe)
+        path.join(localAppData, 'Programs', 'YAS Browser', 'resources', 'bin', binExe),
+        path.join(localAppData, 'Programs', 'YAS Browser', 'bin', binExe)
       ];
       for (const candidate of priority2) {
         try {
@@ -112,6 +126,9 @@ export class ExtractionManager {
         if (!err && stdout && stdout.trim()) {
           const foundPath = stdout.trim().split('\n')[0].trim().replace(/\r/g, '');
           if (fs.existsSync(foundPath)) {
+            if (!isWin) {
+              try { fs.chmodSync(foundPath, 0o755); } catch (_) {}
+            }
             return resolve(foundPath);
           }
         }
@@ -138,7 +155,12 @@ export class ExtractionManager {
 
     for (const candidate of fallbacks) {
       try {
-        if (candidate && fs.existsSync(candidate)) return candidate;
+        if (candidate && fs.existsSync(candidate)) {
+          if (!isWin) {
+            try { fs.chmodSync(candidate, 0o755); } catch (_) {}
+          }
+          return candidate;
+        }
       } catch (_) {}
     }
 
@@ -1034,6 +1056,7 @@ export class ExtractionManager {
       0,
       executablePath,
       outputTemplate,
+      formatId,
       formatArgs,
       cleanUrl,
       downloadId,
@@ -1044,7 +1067,7 @@ export class ExtractionManager {
     );
   }
 
-  async executeResilientDownload(strategies, strategyIndex, executablePath, outputTemplate, formatArgs, cleanUrl, downloadId, targetDir, title, ext, callbacks) {
+  async executeResilientDownload(strategies, strategyIndex, executablePath, outputTemplate, formatId, formatArgs, cleanUrl, downloadId, targetDir, title, ext, callbacks) {
     const { onProgress, onComplete, onError } = callbacks;
     const currentStrategy = strategies[strategyIndex] || { name: 'standard_direct', args: [] };
 
@@ -1073,21 +1096,41 @@ export class ExtractionManager {
       return arg;
     });
     const fullCmd = `"${executablePath}" ${sanitizedArgs.join(' ')}`;
-    this.log('DOWNLOAD', `[${downloadId}] [Strategy: ${currentStrategy.name}] Executing: ${fullCmd}`);
+    
+    // Permanent Forensic Developer Diagnostics Logging
+    this.log('DOWNLOAD', `[${downloadId}] === FORENSIC DOWNLOAD TRACE ===`, {
+      url: cleanUrl,
+      formatId,
+      formatArgs: formatArgs.join(' '),
+      executablePath,
+      ffmpegPath: this.cachedFfmpegPath || 'none',
+      outputTemplate,
+      cwd: process.cwd(),
+      strategy: currentStrategy.name,
+      command: fullCmd
+    });
 
     let downloadProcess;
     try {
-      downloadProcess = spawn(executablePath, finalArgs, { windowsHide: true });
+      downloadProcess = spawn(executablePath, finalArgs, { 
+        windowsHide: true,
+        cwd: targetDir 
+      });
     } catch (err) {
-      this.log('ERROR', `[${downloadId}] Failed to spawn yt-dlp: ${err.message}`);
+      this.log('ERROR', `[${downloadId}] Failed to spawn yt-dlp: ${err.message}`, {
+        executablePath,
+        cwd: targetDir,
+        error: err.message
+      });
       if (onError) onError({ downloadId, error: 'Could not initialize download process.' });
       return { success: false, error: err.message };
     }
 
-    this.log('DOWNLOAD', `[${downloadId}] Process spawned successfully (PID: ${downloadProcess.pid})`);
+    this.log('DOWNLOAD', `[${downloadId}] Process spawned successfully (PID: ${downloadProcess.pid}, CWD: ${targetDir})`);
 
     let finalFilePath = null;
     let lastPercent = 0;
+    let stdoutOutput = '';
     let stderrOutput = '';
     let isMerging = false;
 
@@ -1102,6 +1145,7 @@ export class ExtractionManager {
 
     downloadProcess.stdout.on('data', (data) => {
       const rawText = data.toString();
+      stdoutOutput += rawText;
       const lines = rawText.split('\n');
 
       for (const line of lines) {
@@ -1217,9 +1261,14 @@ export class ExtractionManager {
       stderrOutput += data.toString();
     });
 
-    downloadProcess.on('close', async (code) => {
+    downloadProcess.on('close', async (code, signal) => {
       this.activeDownloads.delete(downloadId);
-      this.log('DOWNLOAD', `[${downloadId}] Process exited with code: ${code}`);
+      this.log('DOWNLOAD', `[${downloadId}] Process closed (exit code: ${code}, signal: ${signal || 'none'})`, {
+        exitCode: code,
+        signal,
+        stdoutSnippet: stdoutOutput.slice(0, 500),
+        stderrSnippet: stderrOutput.slice(0, 500)
+      });
 
       if (code === 0) {
         let resolvedPath = finalFilePath;
@@ -1237,14 +1286,18 @@ export class ExtractionManager {
           } catch (_) {}
         }
 
+        // STRICT COMPLETION VERIFICATION:
+        // 1. Output file exists
+        // 2. Physical file size > 100 KB (102400 bytes)
+        // 3. ffprobe confirms valid media container
         if (resolvedPath && fs.existsSync(resolvedPath)) {
           try {
             const stat = fs.statSync(resolvedPath);
-            if (stat.size > 0) {
+            if (stat.size >= 102400) {
               const isValid = await this.verifyOutputFileWithFfprobe(resolvedPath);
               if (isValid) {
                 const sizeFormatted = this.formatBytes(stat.size);
-                this.log('DOWNLOAD', `✓ [${downloadId}] VERIFIED SUCCESS: "${resolvedPath}" (${sizeFormatted}, ${stat.size} bytes)`);
+                this.log('DOWNLOAD', `✓ [${downloadId}] STRICT PHYSICAL VERIFICATION PASSED: "${resolvedPath}" (${sizeFormatted}, ${stat.size} bytes)`);
 
                 if (currentStrategy.name.startsWith('browser_')) {
                   this.lastSuccessfulCookieBrowser = currentStrategy.name.replace('browser_', '');
@@ -1265,6 +1318,8 @@ export class ExtractionManager {
                 }
                 return;
               }
+            } else {
+              this.log('ERROR', `[${downloadId}] File size ${stat.size} bytes is under the strict 100 KB threshold.`);
             }
           } catch (e) {
             this.log('ERROR', `[${downloadId}] Error verifying file stat: ${e.message}`);
@@ -1280,6 +1335,7 @@ export class ExtractionManager {
           strategyIndex + 1,
           executablePath,
           outputTemplate,
+          formatId,
           formatArgs,
           cleanUrl,
           downloadId,
@@ -1320,6 +1376,107 @@ export class ExtractionManager {
     });
 
     return { success: true, downloadId };
+  }
+
+  /**
+   * Diagnostic Test: Tests real download engine with live stream & physical verification
+   */
+  async runRealDownloadDiagnostic() {
+    this.log('DIAGNOSTICS', '>>> Starting Live Download Engine Diagnostic Test <<<');
+    const stages = [];
+    const testId = `diag_${Date.now()}`;
+    const testDir = path.join(os.tmpdir(), 'yas_engine_live_diagnostic');
+
+    try {
+      if (!fs.existsSync(testDir)) fs.mkdirSync(testDir, { recursive: true });
+
+      // Stage 1: Discover binaries
+      const binaries = await this.ensureBinaries();
+      stages.push({
+        stage: 'Binary Discovery',
+        passed: Boolean(binaries.ytdlp),
+        details: `yt-dlp: ${binaries.ytdlp || 'missing'}, ffmpeg: ${binaries.ffmpeg || 'missing'}`
+      });
+
+      if (!binaries.ytdlp) {
+        return {
+          success: false,
+          error: 'yt-dlp binary is missing on disk.',
+          stages
+        };
+      }
+
+      // Stage 2: Download test video
+      const testUrl = 'https://archive.org/download/BigBuckBunny_328/BigBuckBunny_512kb.mp4';
+      stages.push({
+        stage: 'Stream Download Execution',
+        passed: false,
+        details: 'Executing real stream download via bundled binaries...'
+      });
+
+      const result = await new Promise((resolve) => {
+        this.startDownload({
+          downloadId: testId,
+          url: testUrl,
+          formatId: 'bestvideo[height<=720]+bestaudio/best',
+          destinationFolder: testDir,
+          title: 'Diagnostic_Engine_Verification',
+          ext: 'mp4'
+        }, {
+          onComplete: (data) => resolve({ success: true, data }),
+          onError: (err) => resolve({ success: false, err })
+        });
+      });
+
+      if (!result.success || !result.data?.filePath) {
+        stages[stages.length - 1].passed = false;
+        stages[stages.length - 1].details = `Download failed: ${result.err?.error || 'Unknown error'}`;
+        return {
+          success: false,
+          error: result.err?.error || 'Download execution failed',
+          stages
+        };
+      }
+
+      stages[stages.length - 1].passed = true;
+      stages[stages.length - 1].details = `Stream downloaded to "${result.data.filePath}"`;
+
+      // Stage 3: Physical Verification
+      const filePath = result.data.filePath;
+      const stat = fs.statSync(filePath);
+      const isLargeEnough = stat.size >= 102400; // > 100 KB
+      const isProbed = await this.verifyOutputFileWithFfprobe(filePath);
+
+      stages.push({
+        stage: 'Physical File & Media Container Verification',
+        passed: isLargeEnough && isProbed,
+        details: `File size: ${this.formatBytes(stat.size)} (${stat.size} bytes), Container valid: ${isProbed}`
+      });
+
+      return {
+        success: isLargeEnough && isProbed,
+        file: {
+          path: filePath,
+          size: stat.size,
+          sizeFormatted: this.formatBytes(stat.size)
+        },
+        environment: {
+          ytdlpPath: binaries.ytdlp,
+          ffmpegPath: binaries.ffmpeg,
+          isPackaged: Boolean(this.app?.isPackaged),
+          resourcesPath: process.resourcesPath || 'N/A',
+          cwd: process.cwd()
+        },
+        stages
+      };
+    } catch (err) {
+      this.log('ERROR', `Diagnostic test error: ${err.message}`);
+      return {
+        success: false,
+        error: err.message,
+        stages
+      };
+    }
   }
 
   cancelDownload(downloadId) {

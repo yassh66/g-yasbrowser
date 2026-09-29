@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkDependencies: () => ipcRenderer.invoke('system:check-dependencies'),
   getDiagnostics: () => ipcRenderer.invoke('system:check-dependencies'),
   runSelfTest: () => ipcRenderer.invoke('system:run-self-test'),
+  runRealDownloadDiagnostic: () => ipcRenderer.invoke('media:run-diagnostic-test'),
   downloadBinaries: () => ipcRenderer.invoke('system:install-binaries'),
   getCookieBrowsers: () => ipcRenderer.invoke('system:get-cookie-browsers'),
   setCookieBrowser: (browserId) => ipcRenderer.invoke('system:set-cookie-browser', browserId),
